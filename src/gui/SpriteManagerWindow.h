@@ -2,11 +2,13 @@
 
 #include "FileChooser.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 class ProjectMWrapper;
+class ProjectMGUI;
 
 /**
  * ThisIs395 VJ: manage PNG user sprites rendered by libprojectM.
@@ -16,7 +18,7 @@ class ProjectMWrapper;
 class SpriteManagerWindow
 {
 public:
-    explicit SpriteManagerWindow(ProjectMWrapper& projectMWrapper);
+    explicit SpriteManagerWindow(ProjectMGUI& gui);
 
     void Show();
     void Draw();
