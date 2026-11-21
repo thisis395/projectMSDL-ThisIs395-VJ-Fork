@@ -45,6 +45,15 @@ void MainMenu::Draw()
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("Playlist"))
+        {
+            if (ImGui::MenuItem("Playlist Editor..."))
+            {
+                _gui.ShowPlaylistWindow();
+            }
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("Playback"))
         {
             auto& app = ProjectMSDLApplication::instance();

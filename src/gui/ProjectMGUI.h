@@ -3,6 +3,7 @@
 #include "AboutWindow.h"
 #include "HelpWindow.h"
 #include "MainMenu.h"
+#include "PlaylistWindow.h"
 #include "SettingsWindow.h"
 #include "ToastMessage.h"
 
@@ -94,6 +95,8 @@ public:
      */
     void ShowSettingsWindow();
 
+    void ShowPlaylistWindow();
+
     /**
      * @brief Displays the about window.
      */
@@ -128,6 +131,7 @@ private:
     float _textScalingFactor{0.0f}; //!< The text scaling factor.
 
     MainMenu _mainMenu{*this};
+    PlaylistWindow _playlistWindow;
     SettingsWindow _settingsWindow{*this}; //!< The settings window.
     AboutWindow _aboutWindow{*this}; //!< The about window.
     HelpWindow _helpWindow; //!< Help window with shortcuts and tips.
