@@ -41,7 +41,7 @@ private:
     void AddFile(const std::string& path);
     bool CreateSprite(Sprite& sprite);
     void ApplyVariables(const Sprite& sprite);
-    void RemoveSprite(size_t index);
+    void RemoveSprite(std::size_t index);
 
     ProjectMWrapper& _projectMWrapper;
     FileChooser _fileChooser{FileChooser::Mode::File};
