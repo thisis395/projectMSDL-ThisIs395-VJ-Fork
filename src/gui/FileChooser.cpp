@@ -339,9 +339,10 @@ void FileChooser::ChangeDirectory(Poco::Path newDirectory)
                 auto fileExtension = directoryIterator.path().getExtension();
                 for (const auto& extension : _extensions)
                 {
-                    if (Poco::icompare(directoryIterator.path().getExtension(), extension) != 0)
+                    if (Poco::icompare(directoryIterator.path().getExtension(), extension) == 0)
                     {
                         _currentFileList.push_back(*directoryIterator);
+                        break;
                     }
                 }
             }
