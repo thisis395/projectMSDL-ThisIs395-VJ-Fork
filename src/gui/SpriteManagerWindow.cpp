@@ -2,6 +2,8 @@
 
 #include "ProjectMWrapper.h"
 
+#include <projectM-4/user_sprites.h>
+
 #include "imgui.h"
 
 #include <Poco/File.h>
