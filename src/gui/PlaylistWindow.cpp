@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <iomanip>
 #include <string>
 
 PlaylistWindow::PlaylistWindow()
@@ -27,7 +29,8 @@ void PlaylistWindow::Draw()
         return;
     }
 
-    ImGui::SetNextWindowSize(ImVec2(760, 540), ImGuiCond_FirstUseEver);
+    UpdateSequence();
+    ImGui::SetNextWindowSize(ImVec2(850, 610), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("ThisIs395 VJ - Playlist", &_visible))
     {
         if (ImGui::BeginTabBar("PlaylistTabs"))
@@ -35,6 +38,11 @@ void PlaylistWindow::Draw()
             if (ImGui::BeginTabItem("Playlist"))
             {
                 DrawPlaylistTab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Sequence"))
+            {
+                DrawSequenceTab();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Export"))
@@ -103,6 +111,23 @@ void PlaylistWindow::DrawPlaylistTab()
                     projectm_playlist_set_position(playlist, static_cast<uint32_t>(index), _hardCut);
                 }
             }
+            ImGui::SameLine();
+            ImGui::PushID(index);
+            if (ImGui::SmallButton(_favorites.count(path) ? "*" : "Star"))
+            {
+                if (!_favorites.erase(path)) _favorites.insert(path);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("+"))
+            {
+                SequenceClip clip;
+                clip.path = path;
+                clip.sprite = false;
+                clip.duration = _defaultDuration;
+                _sequence.push_back(clip);
+                std::snprintf(_status, sizeof(_status), "Added preset to sequence.");
+            }
+            ImGui::PopID();
             if (ImGui::IsItemHovered())
             {
                 ImGui::SetTooltip("%s", path.c_str());
@@ -157,16 +182,212 @@ void PlaylistWindow::DrawPlaylistTab()
     }
 }
 
+
+void PlaylistWindow::DrawSequenceTab()
+{
+    ImGui::TextUnformatted("Show sequence (session-only)");
+    ImGui::SetNextItemWidth(190);
+    ImGui::InputFloat("Default clip duration (seconds)", &_defaultDuration, 1.0f, 5.0f, "%.1f");
+    _defaultDuration = std::max(0.1f, _defaultDuration);
+    if (ImGui::BeginTabBar("SequenceTypes"))
+    {
+        if (ImGui::BeginTabItem("Presets"))
+        {
+            DrawSequenceClips(false);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Sprites"))
+        {
+            ImGui::TextWrapped("Sprite sequence entries can be staged here. Live sprite playback "
+                               "requires integration with the Sprite Manager from PR #2.");
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##spriteInput", "Full path to PNG sprite", _spritePath, sizeof(_spritePath));
+            if (ImGui::Button("+ Add sprite to sequence") && _spritePath[0] != '\0')
+            {
+                SequenceClip clip;
+                clip.path = _spritePath;
+                clip.sprite = true;
+                clip.duration = _defaultDuration;
+                _sequence.push_back(clip);
+                _spritePath[0] = '\0';
+            }
+            DrawSequenceClips(true);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    ImGui::Separator();
+    ImGui::Text("%zu clips across both tracks", _sequence.size());
+    if (ImGui::Button("Play preset sequence"))
+    {
+        if (_sequence.empty())
+        {
+            std::snprintf(_status, sizeof(_status), "Add presets to the sequence first.");
+        }
+        else
+        {
+            _sequencePlaying = true;
+            _sequencePosition = 0;
+            _sequenceStarted = 0;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Stop sequence"))
+    {
+        _sequencePlaying = false;
+        _sequenceStarted = 0;
+    }
+    ImGui::TextDisabled("Preset playback is functional. Sprite clips are staged but not rendered.");
+}
+
+void PlaylistWindow::DrawSequenceClips(bool sprites)
+{
+    for (std::size_t i = 0; i < _sequence.size();)
+    {
+        SequenceClip& clip = _sequence[i];
+        if (clip.sprite != sprites)
+        {
+            ++i;
+            continue;
+        }
+        ImGui::PushID(static_cast<int>(i));
+        const std::size_t slash = clip.path.find_last_of("/\\");
+        const std::string name = slash == std::string::npos ? clip.path : clip.path.substr(slash + 1);
+        ImGui::Text("%zu. %s", i + 1, name.c_str());
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(100);
+        ImGui::InputFloat("seconds", &clip.duration, 1.0f, 5.0f, "%.1f");
+        clip.duration = std::max(0.1f, clip.duration);
+        ImGui::SameLine();
+        bool removed = ImGui::SmallButton("Remove");
+        if (!removed)
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Up") && i > 0)
+            {
+                std::swap(_sequence[i], _sequence[i - 1]);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Down") && i + 1 < _sequence.size())
+            {
+                std::swap(_sequence[i], _sequence[i + 1]);
+            }
+        }
+        ImGui::PopID();
+        if (removed)
+        {
+            _sequence.erase(_sequence.begin() + static_cast<std::ptrdiff_t>(i));
+            _sequencePlaying = false;
+            _sequenceStarted = 0;
+        }
+        else
+        {
+            ++i;
+        }
+    }
+}
+
+void PlaylistWindow::UpdateSequence()
+{
+    if (!_sequencePlaying || _sequence.empty())
+        return;
+    if (_sequencePosition >= _sequence.size())
+    {
+        _sequencePlaying = false;
+        return;
+    }
+    const uint64_t now = SDL_GetTicks64();
+    if (_sequenceStarted != 0 &&
+        static_cast<double>(now - _sequenceStarted) < _sequence[_sequencePosition].duration * 1000.0)
+        return;
+
+    if (_sequenceStarted != 0)
+        ++_sequencePosition;
+    while (_sequencePosition < _sequence.size() && _sequence[_sequencePosition].sprite)
+        ++_sequencePosition;
+    if (_sequencePosition >= _sequence.size())
+    {
+        _sequencePlaying = false;
+        return;
+    }
+
+    auto* playlist = _projectMWrapper.Playlist();
+    const auto& path = _sequence[_sequencePosition].path;
+    const uint32_t count = projectm_playlist_size(playlist);
+    bool found = false;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        char* item = projectm_playlist_item(playlist, i);
+        if (!item)
+            continue;
+        const bool matches = path == item;
+        projectm_playlist_free_string(item);
+        if (matches)
+        {
+            projectm_playlist_set_position(playlist, i, _hardCut);
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+    {
+        _sequencePlaying = false;
+        std::snprintf(_status, sizeof(_status), "A sequence preset is missing from the live playlist.");
+    }
+    else
+    {
+        _sequenceStarted = now;
+    }
+}
+
 void PlaylistWindow::DrawExportTab()
 {
-    ImGui::TextUnformatted("Playlist video export");
+    auto* playlist = _projectMWrapper.Playlist();
+    ImGui::TextUnformatted("Export the current preset playlist");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##exportPath", "Output .m3u8 path (e.g. C:\\\\Users\\\\You\\\\playlist.m3u8)",
+                             _exportPath, sizeof(_exportPath));
+    if (ImGui::Button("Export current playlist (.m3u8)"))
+    {
+        std::string path(_exportPath);
+        if (path.empty() || path.size() < 6 || path.substr(path.size() - 6) != ".m3u8")
+        {
+            std::snprintf(_status, sizeof(_status), "Enter an output path ending in .m3u8.");
+        }
+        else
+        {
+            // Do not truncate an existing user file without an explicit overwrite interaction.
+            std::ifstream existing(path, std::ios::binary);
+            if (existing.good())
+            {
+                std::snprintf(_status, sizeof(_status), "Output exists. Choose another filename.");
+            }
+            else
+            {
+                std::ofstream out(path, std::ios::binary);
+                if (!out)
+                {
+                    std::snprintf(_status, sizeof(_status), "Could not create playlist file.");
+                }
+                else
+                {
+                    out << "#EXTM3U\n";
+                    const uint32_t count = projectm_playlist_size(playlist);
+                    for (uint32_t i = 0; i < count; ++i)
+                    {
+                        char* item = projectm_playlist_item(playlist, i);
+                        if (!item) continue;
+                        out << item << "\n";
+                        projectm_playlist_free_string(item);
+                    }
+                    out.close();
+                    std::snprintf(_status, sizeof(_status), out ? "Playlist exported." : "Write failed.");
+                }
+            }
+        }
+    }
+    if (_status[0]) ImGui::TextWrapped("%s", _status);
     ImGui::Separator();
-    ImGui::TextWrapped("Planned: render presets, sprite overlays, and synchronized audio "
-                       "to an offline video using deterministic frame timing and FFmpeg.");
-    ImGui::Spacing();
-    ImGui::TextDisabled("Target: H.264 MP4 / 1080p60, with resolution, FPS, "
-                        "codec, range, quality, and audio controls.");
-    ImGui::Spacing();
-    ImGui::TextWrapped("Export is not implemented yet. This tab is a placeholder, "
-                       "not a recorder or video encoder.");
+    ImGui::TextWrapped("This exports a UTF-8 M3U playlist of preset file paths, not an MP4. "
+                       "Video rendering with synchronized audio and sprites is a later milestone.");
 }
