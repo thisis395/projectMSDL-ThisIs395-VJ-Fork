@@ -15,7 +15,7 @@
 
 namespace
 {
-constexpr size_t kMaxManagedSprites = 16;
+constexpr std::size_t kMaxManagedSprites = 16;
 
 const char* AudioBandVariable(int band)
 {
@@ -68,7 +68,7 @@ void SpriteManagerWindow::Draw()
 
         ImGui::Separator();
 
-        for (size_t i = 0; i < _sprites.size();)
+        for (std::size_t i = 0; i < _sprites.size();)
         {
             Sprite& sprite = _sprites[i];
             ImGui::PushID(static_cast<int>(i));
@@ -208,7 +208,7 @@ void SpriteManagerWindow::ApplyVariables(const Sprite& sprite)
     projectm_sprite_set_var(handle, sprite.id, "vjgain", sprite.gain);
 }
 
-void SpriteManagerWindow::RemoveSprite(size_t index)
+void SpriteManagerWindow::RemoveSprite(std::size_t index)
 {
     if (index >= _sprites.size())
     {
