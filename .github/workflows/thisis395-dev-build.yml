@@ -39,18 +39,22 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
+
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE\vcpkg\bootstrap-vcpkg.bat"
-                - name: Enable long Windows file paths
+
+      - name: Enable long Windows file paths
         shell: pwsh
         run: git config --global core.longpaths true
+
       - name: Download preset pack
         uses: actions/checkout@v4
         with:
           repository: projectM-visualizer/presets-cream-of-the-crop
           path: presets-cream-of-the-crop
+
       - name: Download texture pack
         uses: actions/checkout@v4
         with:
