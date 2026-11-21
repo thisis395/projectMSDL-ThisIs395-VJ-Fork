@@ -4,6 +4,7 @@
 #include "HelpWindow.h"
 #include "MainMenu.h"
 #include "SettingsWindow.h"
+#include "SpriteManagerWindow.h"
 #include "ToastMessage.h"
 
 #include "notifications/DisplayToastNotification.h"
@@ -94,6 +95,9 @@ public:
      */
     void ShowSettingsWindow();
 
+    /** Opens the ThisIs395 VJ user sprite manager. */
+    void ShowSpriteManagerWindow();
+
     /**
      * @brief Displays the about window.
      */
@@ -128,7 +132,8 @@ private:
     float _textScalingFactor{0.0f}; //!< The text scaling factor.
 
     MainMenu _mainMenu{*this};
-    SettingsWindow _settingsWindow{*this}; //!< The settings window.
+    SettingsWindow _settingsWindow{*this};
+    SpriteManagerWindow _spriteManagerWindow{*this}; //!< The settings window.
     AboutWindow _aboutWindow{*this}; //!< The about window.
     HelpWindow _helpWindow; //!< Help window with shortcuts and tips.
 
