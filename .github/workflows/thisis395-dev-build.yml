@@ -1,0 +1,179 @@
+# ThisIs395 VJ fork: development artifacts, no Apple Developer or Windows signing certificates.
+# This workflow is independent of the upstream signed release workflows.
+name: ThisIs395 VJ - Unsigned Development Builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, 'dev/**']
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux x64 (DEB and tar.gz)
+    uses: ./.github/workflows/release-linux.yaml
+    with:
+      projectMSDLref: ${{ github.ref_name }}
+      projectMref: master
+      pocoref: poco-1.14.1
+
+  windows:
+    name: Windows x64 portable
+    runs-on: windows-latest
+    env:
+      VCPKG_BINARY_SOURCES: clear
+    steps:
+      - name: Checkout this fork
+        uses: actions/checkout@v4
+        with:
+          path: frontend-sdl2
+          submodules: recursive
+      - name: Checkout vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          path: vcpkg
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\vcpkg\bootstrap-vcpkg.bat"
+      - name: Download preset pack
+        uses: actions/checkout@v4
+        with:
+          repository: projectM-visualizer/presets-cream-of-the-crop
+          path: presets-cream-of-the-crop
+      - name: Download texture pack
+        uses: actions/checkout@v4
+        with:
+          repository: projectM-visualizer/presets-milkdrop-texture-pack
+          path: presets-milkdrop-texture-pack
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake -G "Visual Studio 17 2022" -A x64 `
+            -S "$env:GITHUB_WORKSPACE/frontend-sdl2" `
+            -B "$env:GITHUB_WORKSPACE/build-windows" `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            "-DPRESET_DIRS=$env:GITHUB_WORKSPACE/presets-cream-of-the-crop" `
+            "-DTEXTURE_DIRS=$env:GITHUB_WORKSPACE/presets-milkdrop-texture-pack/textures" `
+            -DENABLE_INSTALL_BDEPS=ON
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:GITHUB_WORKSPACE/build-windows" --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          cpack --config "$env:GITHUB_WORKSPACE/build-windows/CPackConfig.cmake" -C Release -G ZIP -B "$env:GITHUB_WORKSPACE/build-windows"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: projectMSDL-ThisIs395-Windows-x64-unsigned
+          path: build-windows/*.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS Universal 2 app (ad-hoc signed)
+    runs-on: macos-15
+    steps:
+      - name: Ensure build tools
+        run: brew install cmake ninja
+      - name: Checkout SDL2
+        uses: actions/checkout@v4
+        with:
+          repository: libsdl-org/SDL
+          path: libsdl2
+          ref: release-2.32.10
+          submodules: recursive
+      - name: Build universal SDL2
+        run: |
+          cmake -G Ninja -S libsdl2 -B build-sdl2 \
+            '-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64' \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install-sdl2"
+          cmake --build build-sdl2 --parallel 4
+          cmake --install build-sdl2
+      - name: Checkout POCO
+        uses: actions/checkout@v4
+        with:
+          repository: pocoproject/poco
+          path: poco
+          ref: poco-1.14.1
+          submodules: recursive
+      - name: Build universal POCO
+        run: |
+          cmake -G Ninja -S poco -B build-poco \
+            '-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64' \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install-poco" \
+            -DENABLE_CRYPTO=OFF -DENABLE_NET=OFF -DENABLE_NETSSL=OFF \
+            -DENABLE_ZIP=OFF -DENABLE_MONGODB=OFF -DENABLE_REDIS=OFF \
+            -DENABLE_PAGECOMPILER=OFF -DENABLE_PAGECOMPILER_FILE2PAGE=OFF \
+            -DENABLE_ACTIVERECORD=OFF -DENABLE_ACTIVERECORD_COMPILER=OFF \
+            -DENABLE_DATA_ODBC=OFF -DENABLE_DATA_POSTGRESQL=OFF \
+            -DENABLE_DATA_MYSQL=OFF -DENABLE_JWT=OFF -DENABLE_PROMETHEUS=OFF
+          cmake --build build-poco --parallel 4
+          cmake --install build-poco
+      - name: Checkout libprojectM
+        uses: actions/checkout@v4
+        with:
+          repository: projectM-visualizer/projectm
+          path: projectm
+          ref: master
+          submodules: recursive
+      - name: Build universal libprojectM
+        run: |
+          cmake -G Ninja -S projectm -B build-libprojectm \
+            '-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64' \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install-libprojectm"
+          cmake --build build-libprojectm --parallel 4
+          cmake --install build-libprojectm
+      - name: Checkout this fork
+        uses: actions/checkout@v4
+        with:
+          path: frontend-sdl2
+          submodules: recursive
+      - name: Download preset pack
+        uses: actions/checkout@v4
+        with:
+          repository: projectM-visualizer/presets-cream-of-the-crop
+          path: presets-cream-of-the-crop
+      - name: Download texture pack
+        uses: actions/checkout@v4
+        with:
+          repository: projectM-visualizer/presets-milkdrop-texture-pack
+          path: presets-milkdrop-texture-pack
+      - name: Build and install universal app
+        run: |
+          cmake -G Ninja -S frontend-sdl2 -B build-frontend \
+            '-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64' \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_BUILD_TYPE=Release -DENABLE_FREETYPE=OFF \
+            "-DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/install-libprojectm;$GITHUB_WORKSPACE/install-poco;$GITHUB_WORKSPACE/install-sdl2" \
+            "-DPRESET_DIRS=$GITHUB_WORKSPACE/presets-cream-of-the-crop" \
+            "-DTEXTURE_DIRS=$GITHUB_WORKSPACE/presets-milkdrop-texture-pack/textures" \
+            -DENABLE_INSTALL_BDEPS=ON
+          cmake --build build-frontend --parallel 4
+          cmake --install build-frontend --prefix "$GITHUB_WORKSPACE/install"
+      - name: Ad-hoc sign and validate application
+        run: |
+          APP="$GITHUB_WORKSPACE/install/projectM.app"
+          test -d "$APP"
+          lipo -verify_arch x86_64 arm64 "$APP/Contents/MacOS/projectM"
+          # Ad-hoc signatures are free, and valid for local development.
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$GITHUB_WORKSPACE/projectMSDL-ThisIs395-macOS-Universal-adhoc.zip"
+      - name: Upload macOS Universal 2 app
+        uses: actions/upload-artifact@v4
+        with:
+          name: projectMSDL-ThisIs395-macOS-Universal-adhoc
+          path: projectMSDL-ThisIs395-macOS-Universal-adhoc.zip
+          if-no-files-found: error
