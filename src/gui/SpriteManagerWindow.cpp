@@ -7,6 +7,7 @@
 #include <Poco/File.h>
 #include <Poco/Path.h>
 #include <Poco/String.h>
+#include <Poco/Util/Application.h>
 
 #include <algorithm>
 #include <string>
@@ -28,8 +29,8 @@ const char* AudioBandVariable(int band)
 }
 }
 
-SpriteManagerWindow::SpriteManagerWindow(ProjectMWrapper& projectMWrapper)
-    : _projectMWrapper(projectMWrapper)
+SpriteManagerWindow::SpriteManagerWindow(ProjectMGUI&)
+    : _projectMWrapper(Poco::Util::Application::instance().getSubsystem<ProjectMWrapper>())
 {
     _fileChooser.Title("Select transparent PNG sprite");
     _fileChooser.AllowedExtensions({"png"});
