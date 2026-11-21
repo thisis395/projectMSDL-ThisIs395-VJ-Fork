@@ -63,7 +63,7 @@ jobs:
       - name: Configure and build
         shell: pwsh
         run: |
-          cmake -G "Visual Studio 17 2022" -A x64 `
+          cmake -G "Visual Studio 18 2026" -A x64 `
             -S "$env:GITHUB_WORKSPACE/frontend-sdl2" `
             -B "$env:GITHUB_WORKSPACE/build-windows" `
             "-DCMAKE_TOOLCHAIN_FILE=$env:GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" `
@@ -177,7 +177,7 @@ jobs:
         run: |
           APP="$GITHUB_WORKSPACE/install/projectM.app"
           test -d "$APP"
-          lipo -verify_arch x86_64 arm64 "$APP/Contents/MacOS/projectM"
+          lipo "$APP/Contents/MacOS/projectM" -verify_arch x86_64 arm64
           # Ad-hoc signatures are free, and valid for local development.
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
