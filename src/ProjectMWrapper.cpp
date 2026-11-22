@@ -11,6 +11,7 @@
 
 #include <SDL2/SDL_opengl.h>
 
+#include <algorithm>
 #include <cmath>
 
 const char* ProjectMWrapper::name() const
@@ -36,6 +37,7 @@ void ProjectMWrapper::initialize(Poco::Util::Application& app)
 
         auto presetPaths = GetPathListWithDefault("presetPath", app.config().getString("application.dir", ""));
         auto texturePaths = GetPathListWithDefault("texturePath", app.config().getString("", ""));
+        _textureSearchPaths = texturePaths;
 
         _projectM = projectm_create();
         if (!_projectM)
@@ -143,6 +145,30 @@ projectm_handle ProjectMWrapper::ProjectM() const
 projectm_playlist_handle ProjectMWrapper::Playlist() const
 {
     return _playlist;
+}
+
+void ProjectMWrapper::AddSpriteTextureDirectory(const std::string& directory)
+{
+    if (!_projectM || directory.empty())
+    {
+        return;
+    }
+
+    if (std::find(_textureSearchPaths.begin(), _textureSearchPaths.end(), directory) != _textureSearchPaths.end())
+    {
+        return;
+    }
+
+    // Give explicitly imported sprite directories precedence over packaged preset textures.
+    _textureSearchPaths.insert(_textureSearchPaths.begin(), directory);
+
+    std::vector<const char*> paths;
+    paths.reserve(_textureSearchPaths.size());
+    for (const auto& path : _textureSearchPaths)
+    {
+        paths.push_back(path.c_str());
+    }
+    projectm_set_texture_search_paths(_projectM, paths.data(), paths.size());
 }
 
 int ProjectMWrapper::TargetFPS()

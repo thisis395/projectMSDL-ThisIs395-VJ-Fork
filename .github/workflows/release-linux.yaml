@@ -121,6 +121,16 @@ jobs:
           repository: projectM-visualizer/presets-milkdrop-texture-pack
           path: presets-milkdrop-texture-pack
 
+      - name: Set up Python for application icon generation
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Generate branded application icons
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python frontend-sdl2/tools/generate_icons.py
+
       - name: Build frontend-sdl2
         run: |
           mkdir cmake-build-frontend-sdl2
@@ -224,6 +234,16 @@ jobs:
         with:
           repository: projectM-visualizer/presets-milkdrop-texture-pack
           path: presets-milkdrop-texture-pack
+
+      - name: Set up Python for application icon generation
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Generate branded application icons
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python frontend-sdl2/tools/generate_icons.py
 
       - name: Build frontend-sdl2
         run: |

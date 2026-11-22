@@ -89,6 +89,12 @@ void MainMenu::Draw()
 
         if (ImGui::BeginMenu("Options"))
         {
+            if (ImGui::MenuItem("Sprite Manager..."))
+            {
+                _gui.ShowSpriteManagerWindow();
+            }
+            ImGui::Separator();
+
             auto& app = ProjectMSDLApplication::instance();
 
             if (ImGui::BeginMenu("Audio Capture Device"))
