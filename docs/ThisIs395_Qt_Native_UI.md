@@ -1,42 +1,39 @@
-# Qt6 native control center (first increment)
+# Qt6 native control center: feature branch
 
-This feature is **opt-in** and does not replace the existing SDL/ImGui app.
+This branch adds an optional Qt6 Widgets control center beside the existing SDL/ImGui application.
 
-## What works
+## Native functionality implemented in source
 
-- A Qt6 Widgets desktop window with OS-native controls and file/folder chooser dialogs.
-- Configurable paths to the existing visualizer executable, preset folder, and texture folder.
-- Width, height and fullscreen launch settings.
-- Launch/stop the existing SDL visualizer in a separate OS window using QProcess.
-- Display the child application's stdout/stderr and process exit state.
-- Store configuration locally using platform-native QSettings.
-- Pop out an independent options/info window.
+- Visualizer launch/stop in a separate process, native file/folder dialogs, log output, and persisted launch preferences.
+- **Show Editor** with **Playlist**, **Sequence**, **Render**, and **Export** tabs.
+- Import .milk presets and PNG sprite assets into independent libraries; insert selected entries into a shared sequence.
+- Reorder/remove sequence clips; edit their durations and incoming fades.
+- Save and reopen editor projects with schema \`thisis395.native-show.v1\`. This is separate from the renderer manifest format.
+- Configure video width, height, frame rate, codec, bitrate, audio file, audio length/gain, and target path.
+- Export \`thisis395.render-job.v1\` JSON for the existing \`tools/render_offline.py\` offline renderer. Clip offsets are contiguous per lane, matching existing renderer assumptions.
+- One independent **options pop-out shell** (currently informational).
 
-## Build
+## Limitations
 
-Install Qt 6 Widgets development files alongside the existing project dependencies.
+The Qt editor currently maintains its own show state. It does **not** yet synchronize live playback, sequence cues or Sprite Manager changes to the SDL process. The old SDL ImGui editors remain fully available. Render-job JSON export does not itself run FFmpeg. The original rendering backend requires separate setup and testing. Native show projects are not importable by the existing ImGui editor.
 
-```sh
+The native app is **opt-in**, so existing SDL builds do not require Qt:
+
+\`\`\`sh
 cmake -S . -B cmake-build -DENABLE_QT_NATIVE_UI=ON
 cmake --build cmake-build --config Release
-```
+\`\`\`
 
-The executable is named `ThisIs395-VJ-ControlCenter` (with .exe on Windows).
-Point it at a built `projectMSDL` / `projectM` binary if the renderer is not installed beside the control center.
+Qt 6 Widgets development libraries are required. Linux's standalone native UI compilation workflow is in \`.github/workflows/native-ui-check.yml\`. A successful compile is not a physical GPU/runtime test, and does not prove platform packaging.
 
-## Explicit limitations
+### Native Windows/macOS/Linux distribution
 
-- This is the **first functioning native shell**, not a complete UI port.
-- Playlist, Sequence, Render, Export, Sprite Manager and their settings are **still inside the old SDL/ImGui process**; native tab controls and shared project state must be implemented next.
-- The pop-out options window currently contains setup information only. Full editable options in a pop-out are future work.
-- A separate Qt binary is not yet integrated into the macOS .app layout or distribution packaging. Qt runtime deployment (including Windows platform plugins) requires testing.
-- The existing renderer is a child process; closing the control center terminates it.
-- No automated Qt-enabled CI job or physical cross-platform testing yet. Existing non-Qt CI is unaffected.
+Qt runtime platform plugins must be packaged. On macOS, locate the SDL program binary inside the .app and handle application bundle launching. Windows needs Qt DLL and \`platforms/qwindows\` deployment. macOS Universal builds and Linux desktop integration remain to be validated.
 
-## Next phases
+## Next integration work
 
-1. Extract a shared, testable show/project state model for playlist, sequence, sprites, render jobs, and configuration.
-2. Implement real Qt Playlist, Sequence, Render and Export editors against that model.
-3. Replace the placeholder options window with a detached, complete settings editor, and persist window layouts.
-4. Add an IPC/control protocol between Qt and the renderer so controls work while visualizer runs independently.
-5. Package Qt dependencies correctly for Windows, macOS Universal, and Linux; add Qt-enabled CI and manual rendering tests.
+1. Define a project/show model shared by Qt and the live renderer. Decide how to reconcile live ImGui edits, show loading and external changes.
+2. Add IPC for preset cue, playback status, seek, stop, sequence lock/next/previous, sprite scene changes and errors, with a protocol/version handshake.
+3. Convert the current informational options pop-out into complete editable native settings.
+4. Add native render invocation/progress/cancel with checked prerequisites and safe output handling.
+5. Extend Qt CI to Windows and macOS and test full packaging plus real projectM rendering before merging this branch.
