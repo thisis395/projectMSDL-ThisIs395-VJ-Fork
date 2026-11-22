@@ -40,17 +40,21 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
       - name: Install Qt6
+        if: runner.os != 'Linux'
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
           arch: ${{ matrix.qt_arch }}
           cache: true
-      - name: Install Linux GUI dependencies
+      - name: Install Qt6 and Linux GUI dependencies from Ubuntu packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1 libxkbcommon-x11-0 libxcb-cursor0 libfuse2 \
+          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools qmake6 ninja-build pkg-config \
+            libgl1 libxkbcommon-x11-0 libxcb-cursor0 libfuse2 \
             libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0
+          qmake6 -query QT_VERSION
+          pkg-config --modversion Qt6Widgets
       - name: Configure standalone native Qt application
         shell: bash
         run: cmake -S src/native/standalone -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
