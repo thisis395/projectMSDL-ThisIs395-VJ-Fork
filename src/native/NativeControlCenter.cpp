@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QFile>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
@@ -239,6 +240,7 @@ private:
             return;
         }
         pendingId_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        pendingElapsed_.start();
         QJsonObject request{{QStringLiteral("version"), 1},
                             {QStringLiteral("id"), pendingId_},
                             {QStringLiteral("action"), action}};
@@ -262,7 +264,14 @@ private:
         }
         const QString path = mailboxDir_.filePath(QStringLiteral("response.json"));
         QFile file(path);
-        if (!file.open(QIODevice::ReadOnly)) return;
+        if (!file.open(QIODevice::ReadOnly)) {
+            if (!pendingId_.isEmpty() && pendingElapsed_.isValid() && pendingElapsed_.elapsed() > 5000) {
+                pendingId_.clear();
+                QFile::remove(mailboxDir_.filePath(QStringLiteral("command.json")));
+                status_->setText(tr("Renderer did not respond within 5 seconds."));
+            }
+            return;
+        }
         const auto response = QJsonDocument::fromJson(file.readAll()).object();
         file.close();
         QFile::remove(path);
@@ -308,6 +317,7 @@ private:
     QTemporaryDir mailboxDir_;
     QTimer mailboxPoll_;
     QString pendingId_;
+    QElapsedTimer pendingElapsed_;
     bool sendHandshakeOnStart_ = false;
     QLineEdit* executable_ = nullptr;
     QLineEdit* presetPath_ = nullptr;
