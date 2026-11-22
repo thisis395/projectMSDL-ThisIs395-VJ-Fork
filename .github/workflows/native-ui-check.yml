@@ -54,7 +54,7 @@ jobs:
             libgl1 libxkbcommon-x11-0 libxcb-cursor0 libfuse2 \
             libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0
           qmake6 -query QT_VERSION
-          pkg-config --modversion Qt6Widgets
+          dpkg-query -W -f='Qt6 development package: ${Version}\n' qt6-base-dev
       - name: Configure standalone native Qt application
         shell: bash
         run: cmake -S src/native/standalone -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
