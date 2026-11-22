@@ -33,6 +33,8 @@ add_library(ProjectMSDL-GUI STATIC
         PresetSelection.h
         ProjectMGUI.cpp
         ProjectMGUI.h
+        PlaylistWindow.cpp
+        PlaylistWindow.h
         SettingsWindow.cpp
         SettingsWindow.h
         SpriteManagerWindow.cpp
