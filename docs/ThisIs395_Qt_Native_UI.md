@@ -93,3 +93,26 @@ retention is set to 30 days.
 
 The workflow has been committed; **do not claim download availability or successful
 packaging until the corresponding GitHub Actions run completes**.
+
+
+## Unified VJ suite build (Qt + SDL together)
+
+The native-editor-only artifacts from `native-ui-check.yml` remain useful for Qt smoke tests, but they do **not** include the SDL renderer. The new `.github/workflows/unified-suite.yaml` builds **both targets in the same project** using `-DENABLE_QT_NATIVE_UI=ON`, and packages them as a suite.
+
+| Platform | Unified artifact | Layout |
+|---|---|---|
+| Windows x64 | `ThisIs395-VJ-suite-windows-x64` | Single ZIP containing the Qt launcher, `projectMSDL.exe`, Qt DLLs/plugins, and installed renderer files |
+| macOS Intel | `ThisIs395-VJ-suite-macos-intel` | One `projectM.app` with Qt control center as Finder entrypoint and `projectM` renderer in the same `Contents/MacOS` directory |
+| Ubuntu Linux x64 | `ThisIs395-VJ-suite-linux-x64` | Single DEB installing both executables; Qt6 runtime comes from system package dependencies |
+
+Two executables are intentional. Qt remains a separate process so the renderer has its own pop-out OpenGL window. **One build and one distribution does not mean one OS process.** When the integrated suite installs both executables together, the native control center's default renderer path resolves to the sibling executable.
+
+Build manually with the full source dependencies and Qt6 Widgets:
+
+```sh
+cmake -S . -B build -DENABLE_QT_NATIVE_UI=ON
+cmake --build build --config Release
+cmake --install build --config Release --prefix /some/install/path
+```
+
+**CI status:** The unified packaging workflow must pass before these artifact names are considered downloadable. Previously built native-only UI artifacts do not retroactively become integrated packages. The Qt-to-renderer mailbox and separate-window arrangement still need physical smoke testing.
