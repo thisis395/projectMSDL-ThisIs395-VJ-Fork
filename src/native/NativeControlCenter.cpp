@@ -1,3 +1,5 @@
+#include "NativeShowEditor.h"
+
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -92,17 +94,7 @@ public:
         visualLayout->addWidget(output_, 1);
         tabs->addTab(visualizer, tr("Visualizer"));
 
-        auto* info = new QWidget;
-        auto* infoLayout = new QVBoxLayout(info);
-        auto* explanation = new QLabel(tr(
-            "The existing SDL visualizer and its Playlist, Sequence, Render, Export, "
-            "and Sprite Manager interfaces remain available in the visualizer window. "
-            "This native Qt control center launches that existing app in a separate window. "
-            "Migrating those editors into native Qt controls is a later step."));
-        explanation->setWordWrap(true);
-        infoLayout->addWidget(explanation);
-        infoLayout->addStretch();
-        tabs->addTab(info, tr("Workspace"));
+        tabs->addTab(new NativeShowEditor(tabs), tr("Show Editor"));
 
         optionsWindow_ = new QWidget(nullptr, Qt::Window);
         optionsWindow_->setWindowTitle(tr("ThisIs395 VJ - Options"));
