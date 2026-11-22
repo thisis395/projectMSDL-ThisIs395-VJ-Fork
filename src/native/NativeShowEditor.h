@@ -24,6 +24,7 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QVector>
 
 #include <algorithm>
 
