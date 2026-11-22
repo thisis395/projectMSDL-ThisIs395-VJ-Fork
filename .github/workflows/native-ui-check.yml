@@ -1,4 +1,4 @@
-name: Qt6 Native UI Check
+name: Qt6 Native UI Packages
 
 on:
   push:
@@ -9,20 +9,97 @@ on:
       - 'src/native/**'
       - '.github/workflows/native-ui-check.yml'
       - 'CMakeLists.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  qt6-linux:
-    runs-on: ubuntu-latest
+  native-package:
+    name: Native UI ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            label: Windows x64
+            os_tag: windows-x64
+            qt_arch: win64_msvc2022_64
+          - runner: macos-15-intel
+            label: macOS Intel
+            os_tag: macos-intel
+            qt_arch: clang_64
+          - runner: ubuntu-22.04
+            label: Linux x64
+            os_tag: linux-x64
+            qt_arch: gcc_64
     steps:
       - uses: actions/checkout@v4
-      - name: Install Qt6 Widgets
+      - name: Enable MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y qt6-base-dev pkg-config
-      - name: Compile native control center
+          sudo apt-get install -y libgl1 libxkbcommon-x11-0 libxcb-cursor0 libfuse2 \
+            libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0
+      - name: Configure standalone native Qt application
+        shell: bash
+        run: cmake -S src/native/standalone -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Compile native Qt application
+        shell: bash
+        run: cmake --build build/native --parallel 2
+      - name: Bundle Windows Qt DLLs and platform plugins
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          c++ -std=c++17 -fPIC -Wall -Wextra -Werror \
-            src/native/NativeControlCenter.cpp \
-            -o native-control-center $(pkg-config --cflags --libs Qt6Widgets)
-      - name: Verify binary
-        run: test -s native-control-center
+          New-Item -ItemType Directory -Force -Path dist/ThisIs395-VJ-ControlCenter | Out-Null
+          Copy-Item build/native/ThisIs395-VJ-ControlCenter.exe dist/ThisIs395-VJ-ControlCenter/
+          $qt = (Get-Command windeployqt.exe -ErrorAction Stop).Source
+          & $qt --release --no-translations --no-compiler-runtime dist/ThisIs395-VJ-ControlCenter/ThisIs395-VJ-ControlCenter.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path dist/ThisIs395-VJ-ControlCenter/platforms/qwindows.dll)) { throw 'Missing Qt Windows platform plugin' }
+      - name: Bundle macOS Qt frameworks
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -R build/native/ThisIs395-VJ-ControlCenter.app dist/
+          macdeployqt dist/ThisIs395-VJ-ControlCenter.app -always-overwrite
+          test -x dist/ThisIs395-VJ-ControlCenter.app/Contents/MacOS/ThisIs395-VJ-ControlCenter
+          test -d dist/ThisIs395-VJ-ControlCenter.app/Contents/Frameworks
+      - name: Package Linux Qt libraries and plugins into AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p dist tools-bin
+          curl -fL --retry 3 -o tools-bin/linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fL --retry 3 -o tools-bin/linuxdeploy-plugin-qt-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x tools-bin/*.AppImage
+          export PATH="$PWD/tools-bin:$PATH"
+          export QMAKE="$(command -v qmake6 || command -v qmake)"
+          test -n "$QMAKE"
+          export OUTPUT="$PWD/dist/ThisIs395-VJ-ControlCenter-linux-x64.AppImage"
+          ARCH=x86_64 tools-bin/linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --executable build/native/ThisIs395-VJ-ControlCenter \
+            --desktop-file src/native/packaging/ThisIs395-VJ-ControlCenter.desktop \
+            --icon-file src/native/packaging/ThisIs395-VJ-ControlCenter.svg \
+            --plugin qt --output appimage
+          test -s "$OUTPUT"
+      - name: Upload downloadable native UI package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ThisIs395-VJ-NativeUI-${{ matrix.os_tag }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
