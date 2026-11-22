@@ -37,3 +37,39 @@ Qt runtime platform plugins must be packaged. On macOS, locate the SDL program b
 3. Convert the current informational options pop-out into complete editable native settings.
 4. Add native render invocation/progress/cancel with checked prerequisites and safe output handling.
 5. Extend Qt CI to Windows and macOS and test full packaging plus real projectM rendering before merging this branch.
+
+
+## First live-renderer control bridge (implemented in source, not yet validated)
+
+The control center creates a unique private \`QTemporaryDir\`, passes it to the existing SDL executable with \`--controlDir\`, and sends a single in-flight JSON command using \`QSaveFile\` atomic replacement.
+
+The SDL \`RenderLoop\` services \`command.json\` on the **render thread**, then publishes \`response.json\` with a version, matching ID, success/error, and current preset/shuffle/lock state. The UI polls for responses, reports errors, and times out after five seconds.
+
+Supported v1 actions:
+
+| Action | Meaning |
+|---|---|
+| \`ping\` | Initial protocol handshake |
+| \`next\`, \`previous\` | Advance/reverse current preset |
+| \`shuffle\` | Toggle live shuffle |
+| \`lock\` | Toggle automatic preset change lock |
+| \`cue\` (+ \`path\`) | Cue a specific preset, **only if already in the live projectM playlist** |
+
+Example request:
+
+\`\`\`json
+{"version":1,"id":"example-unique-id","action":"next"}
+\`\`\`
+
+No TCP port is opened. This mailbox is a simple local prototype, not a production-grade multi-client IPC system. Command files are limited to 8 KB. Commands are serial and clients must match response IDs.
+
+**Not supported yet:** sending the complete Qt sequence into the live renderer, controlling timed sprite scenes, reconciling editor-side and renderer-side mutations, remote control, or bidirectional event streaming. The existing ImGui editor and the Qt project file remain independent.
+
+### Bridge QA before merging
+
+1. Start SDL from the Qt control center. Verify the \`ping\` handshake and error display.
+2. Trigger Next, Previous, Shuffle, Lock, and Cue while music is playing.
+3. Confirm that a cue for a preset absent from the live playlist produces a user-facing error.
+4. Kill the renderer; verify clean timeout and restart behavior.
+5. Check build and runtime behavior on Windows, macOS, and Linux, particularly QTemporaryDir permissions and Poco file-renaming behavior.
+6. Add integration tests and robust persistence/restart logic before retiring the old UI.
