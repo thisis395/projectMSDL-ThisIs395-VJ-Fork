@@ -176,7 +176,7 @@ public:
             if (i >= 0 && i < entries_.size()) {
                 entries_.removeAt(i);
                 refreshClips();
-                clips_->setCurrentRow(std::min(i, entries_.size() - 1));
+                clips_->setCurrentRow(std::min(i, static_cast<int>(entries_.size()) - 1));
             }
         });
         connect(up, &QPushButton::clicked, this, [this] { moveClip(-1); });
