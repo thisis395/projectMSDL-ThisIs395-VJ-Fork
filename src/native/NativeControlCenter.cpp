@@ -12,6 +12,13 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
+#include <QTemporaryDir>
+#include <QTimer>
+#include <QUuid>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -86,6 +93,21 @@ public:
         controls->addWidget(stop_);
         controls->addStretch();
         visualLayout->addLayout(controls);
+        auto* liveControls = new QHBoxLayout;
+        auto* previousPreset = new QPushButton(tr("Previous preset"));
+        auto* nextPreset = new QPushButton(tr("Next preset"));
+        auto* shuffle = new QPushButton(tr("Toggle shuffle"));
+        auto* lock = new QPushButton(tr("Lock / unlock preset"));
+        liveControls->addWidget(previousPreset);
+        liveControls->addWidget(nextPreset);
+        liveControls->addWidget(shuffle);
+        liveControls->addWidget(lock);
+        visualLayout->addLayout(liveControls);
+        connect(previousPreset, &QPushButton::clicked, this, [this] { sendCommand(QStringLiteral("previous")); });
+        connect(nextPreset, &QPushButton::clicked, this, [this] { sendCommand(QStringLiteral("next")); });
+        connect(shuffle, &QPushButton::clicked, this, [this] { sendCommand(QStringLiteral("shuffle")); });
+        connect(lock, &QPushButton::clicked, this, [this] { sendCommand(QStringLiteral("lock")); });
+
         status_ = new QLabel(tr("Visualizer not running"));
         visualLayout->addWidget(status_);
         output_ = new QPlainTextEdit;
@@ -123,14 +145,21 @@ public:
         });
         connect(&process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
             status_->setText(tr("Visualizer error: %1").arg(process_.errorString()));
-            if (error == QProcess::FailedToStart)
+            if (error == QProcess::FailedToStart) {
+                mailboxPoll_.stop();
+                pendingId_.clear();
                 setRunning(false);
+            }
         });
         connect(&process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
                 this, [this](int exitCode, QProcess::ExitStatus) {
                     status_->setText(tr("Visualizer exited with code %1").arg(exitCode));
+                    mailboxPoll_.stop();
+                    pendingId_.clear();
                     setRunning(false);
                 });
+        connect(&mailboxPoll_, &QTimer::timeout, this, [this] { readResponse(); });
+        mailboxPoll_.setInterval(100);
         restoreSettings();
     }
 
@@ -175,6 +204,13 @@ private:
             args << QStringLiteral("--presetPath") << presetPath_->text().trimmed();
         if (!texturePath_->text().trimmed().isEmpty())
             args << QStringLiteral("--texturePath") << texturePath_->text().trimmed();
+        if (!mailboxDir_.isValid()) {
+            QMessageBox::warning(this, tr("Control mailbox unavailable"), tr("Unable to create private local control directory."));
+            setRunning(false);
+            return;
+        }
+        // The directory is unique to this control-center process, avoiding collisions.
+        args << QStringLiteral("--controlDir") << mailboxDir_.path();
         args << QStringLiteral("--width") << QString::number(width_->value());
         args << QStringLiteral("--height") << QString::number(height_->value());
         args << QStringLiteral("--fullscreen") << (fullscreen_->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
@@ -185,6 +221,60 @@ private:
         status_->setText(tr("Starting visualizer..."));
         setRunning(true);
         process_.start();
+        mailboxPoll_.start();
+        sendHandshakeOnStart_ = true;
+    }
+
+
+    void sendCommand(const QString& action)
+    {
+        if (process_.state() != QProcess::Running) {
+            status_->setText(tr("Launch the visualizer before sending commands."));
+            return;
+        }
+        if (!pendingId_.isEmpty()) {
+            status_->setText(tr("Waiting for the previous renderer response."));
+            return;
+        }
+        pendingId_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        QJsonObject request{{QStringLiteral("version"), 1},
+                            {QStringLiteral("id"), pendingId_},
+                            {QStringLiteral("action"), action}};
+        QSaveFile file(mailboxDir_.filePath(QStringLiteral("command.json")));
+        if (!file.open(QIODevice::WriteOnly) ||
+            file.write(QJsonDocument(request).toJson(QJsonDocument::Compact)) < 0 ||
+            !file.commit()) {
+            pendingId_.clear();
+            status_->setText(tr("Unable to write renderer command."));
+            return;
+        }
+        status_->setText(tr("Sent %1; awaiting renderer.").arg(action));
+    }
+
+    void readResponse()
+    {
+        if (sendHandshakeOnStart_ && process_.state() == QProcess::Running && pendingId_.isEmpty()) {
+            sendHandshakeOnStart_ = false;
+            sendCommand(QStringLiteral("ping"));
+        }
+        const QString path = mailboxDir_.filePath(QStringLiteral("response.json"));
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) return;
+        const auto response = QJsonDocument::fromJson(file.readAll()).object();
+        file.close();
+        QFile::remove(path);
+        if (response.value(QStringLiteral("id")).toString() != pendingId_ || pendingId_.isEmpty())
+            return;
+        pendingId_.clear();
+        if (!response.value(QStringLiteral("ok")).toBool()) {
+            status_->setText(tr("Renderer rejected command: %1")
+                                 .arg(response.value(QStringLiteral("error")).toString()));
+            return;
+        }
+        status_->setText(tr("Renderer connected. Preset #%1, shuffle: %2, locked: %3")
+                             .arg(response.value(QStringLiteral("presetIndex")).toInt())
+                             .arg(response.value(QStringLiteral("shuffle")).toBool() ? tr("on") : tr("off"))
+                             .arg(response.value(QStringLiteral("locked")).toBool() ? tr("yes") : tr("no")));
     }
 
     void restoreSettings()
@@ -212,6 +302,10 @@ private:
     }
 
     QProcess process_;
+    QTemporaryDir mailboxDir_;
+    QTimer mailboxPoll_;
+    QString pendingId_;
+    bool sendHandshakeOnStart_ = false;
     QLineEdit* executable_ = nullptr;
     QLineEdit* presetPath_ = nullptr;
     QLineEdit* texturePath_ = nullptr;
