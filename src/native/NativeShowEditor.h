@@ -27,9 +27,12 @@
 #include <QVector>
 
 #include <algorithm>
+#include <functional>
 
 class NativeShowEditor final : public QWidget {
 public:
+    void setCueCallback(std::function<void(const QString&)> callback) { cueCallback_ = std::move(callback); }
+
     explicit NativeShowEditor(QWidget* parent = nullptr) : QWidget(parent) {
         auto* root = new QVBoxLayout(this);
         auto* header = new QHBoxLayout;
@@ -52,6 +55,8 @@ public:
         auto* libActions = new QHBoxLayout;
         libActions->addWidget(addPresets);
         libActions->addWidget(toSequence);
+        auto* cuePreset = new QPushButton(tr("Cue in live visualizer"));
+        libActions->addWidget(cuePreset);
         libLayout->addLayout(libActions);
         libLayout->addWidget(new QLabel(tr("PNG sprite library")));
         sprites_ = new QListWidget;
@@ -157,6 +162,10 @@ public:
             importFiles(sprites_, tr("Import sprites"), tr("PNG sprites (*.png)"));
         });
         connect(toSequence, &QPushButton::clicked, this, [this] { addClip(presets_, false); });
+        connect(cuePreset, &QPushButton::clicked, this, [this] {
+            if (presets_->currentItem() && cueCallback_)
+                cueCallback_(presets_->currentItem()->text());
+        });
         connect(spriteToSequence, &QPushButton::clicked, this, [this] { addClip(sprites_, true); });
         connect(clips_, &QListWidget::currentRowChanged, this, [this](int row) {
             if (row < 0 || row >= entries_.size()) return;
@@ -192,6 +201,7 @@ private:
         double fade = 3;
     };
     QVector<Clip> entries_;
+    std::function<void(const QString&)> cueCallback_;
     QListWidget* presets_ = nullptr;
     QListWidget* sprites_ = nullptr;
     QListWidget* clips_ = nullptr;
