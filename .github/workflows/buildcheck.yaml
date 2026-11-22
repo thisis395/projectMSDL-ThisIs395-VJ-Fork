@@ -89,6 +89,12 @@ jobs:
             "-DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install-frontend-sdl2"
           cmake --build cmake-build-frontend-sdl2 --parallel
 
+      - name: Offline render driver syntax + FFmpeg smoke test
+        run: |
+          sudo apt-get install -y ffmpeg
+          python3 -m py_compile frontend-sdl2/tools/render_offline.py
+          python3 frontend-sdl2/tools/test_render_offline.py
+
       - name: Package projectMSDL
         run: |
           cd cmake-build-frontend-sdl2
