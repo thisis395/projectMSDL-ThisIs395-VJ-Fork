@@ -3,12 +3,16 @@
 #include <Poco/File.h>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Parser.h>
+#include <Poco/JSON/Stringifier.h>
 #include <Poco/Path.h>
 #include <Poco/NotificationCenter.h>
 #include <Poco/Exception.h>
 #include <Poco/Util/Application.h>
 
+#include <cstdint>
+#include <exception>
 #include <fstream>
+#include <utility>
 #include <sstream>
 #include <string>
 
