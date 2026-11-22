@@ -162,6 +162,7 @@ void ProjectMGUI::Draw()
     {
         _mainMenu.Draw();
         _settingsWindow.Draw();
+        _spriteManagerWindow.Draw();
         _playlistWindow.Draw();
         _aboutWindow.Draw();
         _helpWindow.Draw();
@@ -201,6 +202,11 @@ void ProjectMGUI::PopFont()
 void ProjectMGUI::ShowSettingsWindow()
 {
     _settingsWindow.Show();
+}
+
+void ProjectMGUI::ShowSpriteManagerWindow()
+{
+    _spriteManagerWindow.Show();
 }
 
 void ProjectMGUI::ShowPlaylistWindow()

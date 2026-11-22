@@ -13,6 +13,8 @@
 #include <Poco/Util/Subsystem.h>
 
 #include <memory>
+#include <string>
+#include <vector>
 
 class ProjectMWrapper : public Poco::Util::Subsystem
 {
@@ -34,6 +36,9 @@ public:
      * @return The plaslist handle.
      */
     projectm_playlist_handle Playlist() const;
+
+    /** Add the directory containing a selected PNG to projectM's texture search paths. */
+    void AddSpriteTextureDirectory(const std::string& directory);
 
     /**
      * Renders a single projectM frame.
@@ -110,6 +115,8 @@ private:
 
     Poco::AutoPtr<Poco::Util::AbstractConfiguration> _userConfig; //!< View of the "projectM" configuration subkey in the "user" configuration.
     Poco::AutoPtr<Poco::Util::AbstractConfiguration> _projectMConfigView; //!< View of the "projectM" configuration subkey in the "effective" configuration.
+
+    std::vector<std::string> _textureSearchPaths;
 
     projectm_handle _projectM{nullptr}; //!< Pointer to the projectM instance used by the application.
     projectm_playlist_handle _playlist{nullptr}; //!< Pointer to the projectM playlist manager instance.

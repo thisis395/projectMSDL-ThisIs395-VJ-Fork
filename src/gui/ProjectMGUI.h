@@ -5,6 +5,7 @@
 #include "MainMenu.h"
 #include "PlaylistWindow.h"
 #include "SettingsWindow.h"
+#include "SpriteManagerWindow.h"
 #include "ToastMessage.h"
 
 #include "notifications/DisplayToastNotification.h"
@@ -95,7 +96,11 @@ public:
      */
     void ShowSettingsWindow();
 
+    /** Opens the ThisIs395 VJ playlist and sequence editor. */
     void ShowPlaylistWindow();
+
+    /** Opens the ThisIs395 VJ user sprite manager. */
+    void ShowSpriteManagerWindow();
 
     /**
      * @brief Displays the about window.
@@ -131,8 +136,9 @@ private:
     float _textScalingFactor{0.0f}; //!< The text scaling factor.
 
     MainMenu _mainMenu{*this};
+    SettingsWindow _settingsWindow{*this};
+    SpriteManagerWindow _spriteManagerWindow{*this}; //!< The settings window.
     PlaylistWindow _playlistWindow;
-    SettingsWindow _settingsWindow{*this}; //!< The settings window.
     AboutWindow _aboutWindow{*this}; //!< The about window.
     HelpWindow _helpWindow; //!< Help window with shortcuts and tips.
 
