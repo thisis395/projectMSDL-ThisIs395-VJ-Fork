@@ -116,7 +116,9 @@ public:
         visualLayout->addWidget(output_, 1);
         tabs->addTab(visualizer, tr("Visualizer"));
 
-        tabs->addTab(new NativeShowEditor(tabs), tr("Show Editor"));
+        auto* showEditor = new NativeShowEditor(tabs);
+        showEditor->setCueCallback([this](const QString& path) { sendCommand(QStringLiteral("cue"), path); });
+        tabs->addTab(showEditor, tr("Show Editor"));
 
         optionsWindow_ = new QWidget(nullptr, Qt::Window);
         optionsWindow_->setWindowTitle(tr("ThisIs395 VJ - Options"));
@@ -226,7 +228,7 @@ private:
     }
 
 
-    void sendCommand(const QString& action)
+    void sendCommand(const QString& action, const QString& path = QString())
     {
         if (process_.state() != QProcess::Running) {
             status_->setText(tr("Launch the visualizer before sending commands."));
@@ -240,6 +242,7 @@ private:
         QJsonObject request{{QStringLiteral("version"), 1},
                             {QStringLiteral("id"), pendingId_},
                             {QStringLiteral("action"), action}};
+        if (action == QStringLiteral("cue")) request.insert(QStringLiteral("path"), path);
         QSaveFile file(mailboxDir_.filePath(QStringLiteral("command.json")));
         if (!file.open(QIODevice::WriteOnly) ||
             file.write(QJsonDocument(request).toJson(QJsonDocument::Compact)) < 0 ||
