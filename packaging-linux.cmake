@@ -20,6 +20,9 @@ set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "A standalone, Milkdrop-like audio visualiz
 set(CPACK_DEBIAN_PACKAGE_SECTION "sound")
 # Require SDL2 2.0.16 or higher, lower versions can't use monitor devices
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libsdl2-2.0-0 (>=2.0.16), libgl1, libfreetype6")
+if(ENABLE_QT_NATIVE_UI)
+    string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libqt6widgets6 (>= 6.2), qt6-qpa-plugins")
+endif()
 set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
 set(CPACK_DEBIAN_COMPRESSION_TYPE "xz")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "standard")
