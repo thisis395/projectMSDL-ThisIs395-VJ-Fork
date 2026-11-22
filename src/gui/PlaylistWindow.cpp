@@ -10,6 +10,8 @@
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <cmath>
+#include <sstream>
 #include <string>
 
 PlaylistWindow::PlaylistWindow()
@@ -30,7 +32,7 @@ void PlaylistWindow::Draw()
     }
 
     UpdateSequence();
-    ImGui::SetNextWindowSize(ImVec2(1120, 680), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(1240, 780), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("ThisIs395 VJ - Playlist", &_visible))
     {
         if (ImGui::BeginTabBar("PlaylistTabs"))
@@ -46,6 +48,11 @@ void PlaylistWindow::Draw()
                 ImGui::BeginChild("LibraryPanel", ImVec2(0, 0), true);
                 DrawPlaylistTab();
                 ImGui::EndChild();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Render"))
+            {
+                DrawRenderTab();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Export"))
@@ -408,4 +415,305 @@ void PlaylistWindow::DrawExportTab()
     ImGui::Separator();
     ImGui::TextWrapped("This exports a UTF-8 M3U playlist of preset file paths, not an MP4. "
                        "Video rendering with synchronized audio and sprites is a later milestone.");
+}
+
+
+namespace
+{
+std::string RenderBaseName(const std::string& path)
+{
+    const auto slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+std::string EscapeRenderJson(const std::string& input)
+{
+    std::ostringstream out;
+    for (unsigned char character : input)
+    {
+        switch (character)
+        {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (character < 0x20)
+                {
+                    constexpr char hex[] = "0123456789abcdef";
+                    out << "\\u00" << hex[character >> 4] << hex[character & 0x0f];
+                }
+                else
+                    out << static_cast<char>(character);
+                break;
+        }
+    }
+    return out.str();
+}
+}
+
+void PlaylistWindow::DrawRenderTab()
+{
+    ImGui::TextUnformatted("Render workspace");
+    ImGui::SameLine();
+    ImGui::TextDisabled("NLE-style job planning; offline MP4 rendering is not implemented.");
+    ImGui::Separator();
+
+    const float available = ImGui::GetContentRegionAvail().x;
+    const float inspectorWidth = std::max(310.0f, available * 0.34f);
+    const float previewWidth = std::max(300.0f, available - inspectorWidth - 12.0f);
+    ImGui::BeginChild("RenderPreview", ImVec2(previewWidth, 255.0f), true);
+    ImGui::TextUnformatted("PROGRAM MONITOR");
+    ImGui::Separator();
+    ImGui::TextDisabled("Live projectM output stays in the main application window.");
+    ImGui::TextDisabled("An independent offscreen preview is not available yet.");
+    ImGui::Spacing();
+    ImGui::Text("Playhead: %.2f s", _renderPlayhead);
+    if (_renderSelected >= 0 && static_cast<std::size_t>(_renderSelected) < _sequence.size())
+    {
+        const auto& clip = _sequence[static_cast<std::size_t>(_renderSelected)];
+        ImGui::TextWrapped("Selected: %s", RenderBaseName(clip.path).c_str());
+        if (!clip.sprite && ImGui::Button("Cue selected preset in live output"))
+        {
+            auto* playlist = _projectMWrapper.Playlist();
+            if (playlist)
+            {
+                bool found = false;
+                for (uint32_t i = 0; i < projectm_playlist_size(playlist); ++i)
+                {
+                    char* item = projectm_playlist_item(playlist, i);
+                    if (!item) continue;
+                    const bool matches = clip.path == item;
+                    projectm_playlist_free_string(item);
+                    if (matches)
+                    {
+                        projectm_set_soft_cut_duration(_projectMWrapper.ProjectM(), clip.fade);
+                        projectm_playlist_set_position(playlist, i, clip.fade <= 0.0f);
+                        found = true;
+                        break;
+                    }
+                }
+                std::snprintf(_renderStatus, sizeof(_renderStatus), "%s",
+                              found ? "Preset cued in live output." : "Preset not found in live playlist.");
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+    ImGui::BeginChild("RenderSettings", ImVec2(0, 255.0f), true);
+    ImGui::TextUnformatted("OUTPUT SETTINGS");
+    ImGui::Separator();
+    ImGui::SetNextItemWidth(100);
+    ImGui::InputInt("Width", &_renderWidth, 0);
+    ImGui::SetNextItemWidth(100);
+    ImGui::InputInt("Height", &_renderHeight, 0);
+    ImGui::SetNextItemWidth(100);
+    ImGui::InputInt("FPS", &_renderFps, 0);
+    _renderWidth = std::max(16, std::min(_renderWidth, 7680));
+    _renderHeight = std::max(16, std::min(_renderHeight, 4320));
+    _renderFps = std::max(1, std::min(_renderFps, 240));
+    const char* codecs[] = {"H.264", "H.265 / HEVC", "ProRes 422"};
+    ImGui::SetNextItemWidth(155);
+    ImGui::Combo("Codec", &_renderCodec, codecs, 3);
+    ImGui::SetNextItemWidth(100);
+    ImGui::InputInt("Target Mbps", &_renderBitrateMbps, 0);
+    _renderBitrateMbps = std::max(1, std::min(_renderBitrateMbps, 500));
+    ImGui::EndChild();
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("TIMELINE");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Zoom (px/s)", &_renderPixelsPerSecond, 4.0f, 80.0f, "%.0f");
+    DrawRenderTimeline();
+
+    ImGui::Separator();
+    if (_renderSelected >= 0 && static_cast<std::size_t>(_renderSelected) < _sequence.size())
+    {
+        ImGui::PushID("RenderInspector");
+        SequenceClip& clip = _sequence[static_cast<std::size_t>(_renderSelected)];
+        ImGui::Text("CLIP INSPECTOR: %s", RenderBaseName(clip.path).c_str());
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(110);
+        if (ImGui::InputFloat("Duration (s)", &clip.duration, 1.0f, 5.0f, "%.2f"))
+            clip.duration = std::max(0.1f, clip.duration);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(110);
+        if (ImGui::InputFloat("Fade (s)", &clip.fade, 0.5f, 1.0f, "%.2f"))
+            clip.fade = std::max(0.0f, std::min(clip.fade, clip.duration));
+        if (clip.sprite)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Sprite opacity automation not yet connected.");
+        }
+        ImGui::PopID();
+    }
+    else
+    {
+        ImGui::TextDisabled("Select a timeline clip to edit duration and fade.");
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("RENDER QUEUE / JOB");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##renderAudio", "Optional source audio file path", _renderAudioPath, sizeof(_renderAudioPath));
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##renderVideo", "Planned output video path, e.g. show.mp4", _renderVideoPath, sizeof(_renderVideoPath));
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##renderJob", "Save render job path, e.g. show.render.json", _renderJobPath, sizeof(_renderJobPath));
+    if (ImGui::Button("Save render job (.json)"))
+        SaveRenderJob();
+    ImGui::SameLine();
+    ImGui::TextDisabled("Queue/encode disabled until offline renderer exists.");
+    if (_renderStatus[0])
+        ImGui::TextWrapped("%s", _renderStatus);
+}
+
+void PlaylistWindow::DrawRenderTimeline()
+{
+    double presetTotal = 0.0, spriteTotal = 0.0;
+    for (const auto& clip : _sequence)
+    {
+        if (clip.sprite) spriteTotal += std::max(0.1f, clip.duration);
+        else presetTotal += std::max(0.1f, clip.duration);
+    }
+    const double timelineTotal = std::max(presetTotal, spriteTotal);
+    ImGui::Text("Presets: %.1fs   Sprites: %.1fs   Total: %.1fs",
+                presetTotal, spriteTotal, timelineTotal);
+    ImGui::BeginChild("RenderTimelineCanvas", ImVec2(0, 220), true, ImGuiWindowFlags_HorizontalScrollbar);
+    const float labelWidth = 92.0f;
+    const float scale = _renderPixelsPerSecond;
+    const float canvasWidth = std::max(ImGui::GetContentRegionAvail().x,
+                                      labelWidth + static_cast<float>(timelineTotal) * scale + 80.0f);
+    ImGui::InvisibleButton("##timelineSurface", ImVec2(canvasWidth, 174.0f));
+    const ImVec2 base = ImGui::GetItemRectMin();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const float trackX = base.x + labelWidth;
+    const float rulerY = base.y + 14.0f;
+    const float presetY = base.y + 46.0f;
+    const float spriteY = base.y + 106.0f;
+    draw->AddText(ImVec2(base.x + 3, presetY + 12), IM_COL32(220, 220, 220, 255), "PRESETS");
+    draw->AddText(ImVec2(base.x + 3, spriteY + 12), IM_COL32(220, 220, 220, 255), "SPRITES");
+    draw->AddRectFilled(ImVec2(trackX, presetY), ImVec2(base.x + canvasWidth, presetY + 45),
+                        IM_COL32(34, 46, 64, 255));
+    draw->AddRectFilled(ImVec2(trackX, spriteY), ImVec2(base.x + canvasWidth, spriteY + 45),
+                        IM_COL32(48, 37, 61, 255));
+    const int tickEvery = scale >= 35.0f ? 1 : (scale >= 12.0f ? 5 : 10);
+    for (int sec = 0; sec <= static_cast<int>(timelineTotal + 10.0); sec += tickEvery)
+    {
+        const float x = trackX + sec * scale;
+        draw->AddLine(ImVec2(x, rulerY), ImVec2(x, spriteY + 45), IM_COL32(100, 100, 100, 85));
+        char tick[24];
+        std::snprintf(tick, sizeof(tick), "%ds", sec);
+        draw->AddText(ImVec2(x + 3, base.y), IM_COL32(190, 190, 190, 255), tick);
+    }
+
+    double presetOffset = 0.0, spriteOffset = 0.0;
+    for (std::size_t i = 0; i < _sequence.size(); ++i)
+    {
+        const auto& clip = _sequence[i];
+        double& offset = clip.sprite ? spriteOffset : presetOffset;
+        const float x1 = trackX + static_cast<float>(offset) * scale;
+        const float x2 = x1 + std::max(0.1f, clip.duration) * scale;
+        const float y = clip.sprite ? spriteY : presetY;
+        const ImVec2 a(x1 + 1.0f, y + 3.0f), b(x2 - 1.0f, y + 42.0f);
+        const bool selected = _renderSelected == static_cast<int>(i);
+        draw->AddRectFilled(a, b, selected ? IM_COL32(63, 145, 192, 255) :
+                            (clip.sprite ? IM_COL32(128, 79, 150, 255) : IM_COL32(57, 95, 145, 255)), 4.0f);
+        draw->AddRect(a, b, selected ? IM_COL32(240, 240, 240, 255) : IM_COL32(150, 170, 190, 200), 4.0f);
+        if (x2 - x1 > 45.0f)
+        {
+            const std::string label = RenderBaseName(clip.path);
+            draw->PushClipRect(a, b, true);
+            draw->AddText(ImVec2(x1 + 6.0f, y + 13.0f), IM_COL32(255, 255, 255, 255), label.c_str());
+            draw->PopClipRect();
+        }
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+            ImGui::IsMouseHoveringRect(a, b))
+        {
+            _renderSelected = static_cast<int>(i);
+            _renderPlayhead = offset;
+        }
+        offset += std::max(0.1f, clip.duration);
+    }
+
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        ImGui::IsMouseHoveringRect(ImVec2(trackX, base.y), ImVec2(base.x + canvasWidth, presetY - 1.0f)))
+    {
+        _renderPlayhead = std::max(0.0, std::min(timelineTotal,
+            static_cast<double>((ImGui::GetMousePos().x - trackX) / scale)));
+        _renderSelected = -1;
+    }
+    const float playheadX = trackX + static_cast<float>(_renderPlayhead) * scale;
+    draw->AddLine(ImVec2(playheadX, rulerY), ImVec2(playheadX, spriteY + 45.0f),
+                  IM_COL32(255, 210, 100, 255), 2.0f);
+    ImGui::EndChild();
+}
+
+void PlaylistWindow::SaveRenderJob()
+{
+    const std::string path(_renderJobPath);
+    if (path.size() < 5 || path.substr(path.size() - 5) != ".json")
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Choose a filename ending in .json.");
+        return;
+    }
+    if (_sequence.empty())
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Add sequence clips before saving a render job.");
+        return;
+    }
+    std::ifstream existing(path, std::ios::binary);
+    if (existing.good())
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Job file exists; choose a different filename.");
+        return;
+    }
+    std::ofstream out(path, std::ios::binary);
+    if (!out)
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Could not create render job.");
+        return;
+    }
+    out << std::fixed << std::setprecision(3);
+    out << "{\n  \"schema\": \"thisis395.render-job.v1\",\n";
+    out << "  \"status\": \"planned\",\n  \"encoderImplemented\": false,\n";
+    out << "  \"output\": {\"path\": \"" << EscapeRenderJson(_renderVideoPath)
+        << "\", \"width\": " << _renderWidth << ", \"height\": " << _renderHeight
+        << ", \"fps\": " << _renderFps << ", \"codec\": \""
+        << ( _renderCodec == 1 ? "hevc" : (_renderCodec == 2 ? "prores_422" : "h264"))
+        << "\", \"bitrateMbps\": " << _renderBitrateMbps << "},\n";
+    out << "  \"audioSource\": \"" << EscapeRenderJson(_renderAudioPath) << "\",\n";
+    out << "  \"tracks\": {\n    \"presets\": [\n";
+    bool first = true;
+    double offset = 0.0;
+    for (const auto& clip : _sequence)
+    {
+        if (clip.sprite) continue;
+        if (!first) out << ",\n";
+        out << "      {\"path\": \"" << EscapeRenderJson(clip.path) << "\", \"startSeconds\": "
+            << offset << ", \"durationSeconds\": " << std::max(0.1f, clip.duration)
+            << ", \"fadeSeconds\": " << std::max(0.0f, clip.fade) << "}";
+        offset += std::max(0.1f, clip.duration);
+        first = false;
+    }
+    out << "\n    ],\n    \"sprites\": [\n";
+    first = true;
+    offset = 0.0;
+    for (const auto& clip : _sequence)
+    {
+        if (!clip.sprite) continue;
+        if (!first) out << ",\n";
+        out << "      {\"path\": \"" << EscapeRenderJson(clip.path) << "\", \"startSeconds\": "
+            << offset << ", \"durationSeconds\": " << std::max(0.1f, clip.duration)
+            << ", \"fadeSeconds\": " << std::max(0.0f, clip.fade) << "}";
+        offset += std::max(0.1f, clip.duration);
+        first = false;
+    }
+    out << "\n    ]\n  }\n}\n";
+    out.close();
+    std::snprintf(_renderStatus, sizeof(_renderStatus), "%s",
+                  out ? "Render job saved (JSON only, no video generated)." : "Failed to write complete render job.");
 }

@@ -20,6 +20,9 @@ public:
 private:
     void DrawPlaylistTab();
     void DrawExportTab();
+    void DrawRenderTab();
+    void DrawRenderTimeline();
+    void SaveRenderJob();
     void DrawSequenceTab();
     void DrawSequenceClips(bool sprites);
     void UpdateSequence();
@@ -47,4 +50,16 @@ private:
     std::size_t _sequencePosition{0};
     uint64_t _sequenceStarted{0};
     bool _sequencePlaying{false};
+    int _renderSelected{-1};
+    double _renderPlayhead{0.0};
+    float _renderPixelsPerSecond{14.0f};
+    int _renderWidth{1920};
+    int _renderHeight{1080};
+    int _renderFps{60};
+    int _renderCodec{0};
+    int _renderBitrateMbps{18};
+    char _renderJobPath[2048]{};
+    char _renderVideoPath[2048]{};
+    char _renderAudioPath[2048]{};
+    char _renderStatus[256]{};
 };
