@@ -28,6 +28,7 @@ private:
     {
         std::string path;
         float duration{30.0f};
+        float fade{3.0f};
         bool sprite{false};
     };
 
@@ -42,6 +43,7 @@ private:
     std::vector<SequenceClip> _sequence;
     std::set<std::string> _favorites;
     float _defaultDuration{30.0f};
+    float _defaultFade{3.0f};
     std::size_t _sequencePosition{0};
     uint64_t _sequenceStarted{0};
     bool _sequencePlaying{false};

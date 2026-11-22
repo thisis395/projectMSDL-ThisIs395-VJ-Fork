@@ -30,19 +30,22 @@ void PlaylistWindow::Draw()
     }
 
     UpdateSequence();
-    ImGui::SetNextWindowSize(ImVec2(850, 610), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(1120, 680), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("ThisIs395 VJ - Playlist", &_visible))
     {
         if (ImGui::BeginTabBar("PlaylistTabs"))
         {
-            if (ImGui::BeginTabItem("Playlist"))
+            if (ImGui::BeginTabItem("Playlist + Sequence"))
             {
-                DrawPlaylistTab();
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Sequence"))
-            {
+                const float available = ImGui::GetContentRegionAvail().x;
+                const float leftWidth = std::max(320.0f, available * 0.42f);
+                ImGui::BeginChild("SequencePanel", ImVec2(leftWidth, 0), true);
                 DrawSequenceTab();
+                ImGui::EndChild();
+                ImGui::SameLine();
+                ImGui::BeginChild("LibraryPanel", ImVec2(0, 0), true);
+                DrawPlaylistTab();
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Export"))
@@ -124,6 +127,7 @@ void PlaylistWindow::DrawPlaylistTab()
                 clip.path = path;
                 clip.sprite = false;
                 clip.duration = _defaultDuration;
+                clip.fade = _defaultFade;
                 _sequence.push_back(clip);
                 std::snprintf(_status, sizeof(_status), "Added preset to sequence.");
             }
@@ -185,10 +189,14 @@ void PlaylistWindow::DrawPlaylistTab()
 
 void PlaylistWindow::DrawSequenceTab()
 {
-    ImGui::TextUnformatted("Show sequence (session-only)");
+    ImGui::TextUnformatted("Sequence editor");
     ImGui::SetNextItemWidth(190);
     ImGui::InputFloat("Default clip duration (seconds)", &_defaultDuration, 1.0f, 5.0f, "%.1f");
     _defaultDuration = std::max(0.1f, _defaultDuration);
+    ImGui::SetNextItemWidth(190);
+    ImGui::InputFloat("Default fade (seconds)", &_defaultFade, 0.5f, 1.0f, "%.1f");
+    _defaultFade = std::max(0.0f, std::min(_defaultFade, 15.0f));
+    ImGui::TextDisabled("Set fade to 0 for a hard cut.");
     if (ImGui::BeginTabBar("SequenceTypes"))
     {
         if (ImGui::BeginTabItem("Presets"))
@@ -208,6 +216,7 @@ void PlaylistWindow::DrawSequenceTab()
                 clip.path = _spritePath;
                 clip.sprite = true;
                 clip.duration = _defaultDuration;
+                clip.fade = _defaultFade;
                 _sequence.push_back(clip);
                 _spritePath[0] = '\0';
             }
@@ -238,6 +247,7 @@ void PlaylistWindow::DrawSequenceTab()
         _sequenceStarted = 0;
     }
     ImGui::TextDisabled("Preset playback is functional. Sprite clips are staged but not rendered.");
+    ImGui::TextDisabled("Fades apply to incoming preset transitions.");
 }
 
 void PlaylistWindow::DrawSequenceClips(bool sprites)
@@ -258,6 +268,12 @@ void PlaylistWindow::DrawSequenceClips(bool sprites)
         ImGui::SetNextItemWidth(100);
         ImGui::InputFloat("seconds", &clip.duration, 1.0f, 5.0f, "%.1f");
         clip.duration = std::max(0.1f, clip.duration);
+        if (!sprites)
+        {
+            ImGui::SetNextItemWidth(110);
+            ImGui::InputFloat("Fade (s)", &clip.fade, 0.5f, 1.0f, "%.1f");
+            clip.fade = std::max(0.0f, std::min(clip.fade, 15.0f));
+        }
         ImGui::SameLine();
         bool removed = ImGui::SmallButton("Remove");
         if (!removed)
@@ -324,7 +340,9 @@ void PlaylistWindow::UpdateSequence()
         projectm_playlist_free_string(item);
         if (matches)
         {
-            projectm_playlist_set_position(playlist, i, _hardCut);
+            const float fadeSeconds = _sequence[_sequencePosition].fade;
+            projectm_set_soft_cut_duration(_projectMWrapper.ProjectM(), fadeSeconds);
+            projectm_playlist_set_position(playlist, i, _hardCut || fadeSeconds <= 0.0f);
             found = true;
             break;
         }
