@@ -127,3 +127,15 @@ if (MSVC)
             VS_DPI_AWARE "PerMonitor"
             )
 endif ()
+
+
+option(ENABLE_OFFLINE_RENDERER "Build projectM offline RGB producer (requires projectM >= 4.2)" ON)
+if (ENABLE_OFFLINE_RENDERER AND NOT ENABLE_GLES AND projectM4_VERSION VERSION_GREATER_EQUAL "4.2.0")
+    add_executable(projectMSDL-offline OfflineRenderer.cpp)
+    target_link_libraries(projectMSDL-offline PRIVATE
+        libprojectM::projectM
+        SDL2::SDL2
+        OpenGL::GL)
+else()
+    message(STATUS "Offline RGB producer disabled: requires desktop OpenGL and projectM 4.2+")
+endif()
