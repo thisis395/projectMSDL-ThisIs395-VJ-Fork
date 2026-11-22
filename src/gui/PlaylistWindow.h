@@ -19,6 +19,8 @@ public:
 
 private:
     void DrawPlaylistTab();
+    void DrawSpriteLibraryTab();
+    void ImportSpriteLibraryPath(const std::string& path, bool directory);
     void DrawExportTab();
     void DrawRenderTab();
     void DrawRenderTimeline();
@@ -39,6 +41,11 @@ private:
     ProjectMWrapper& _projectMWrapper;
     bool _visible{false};
     int _selected{-1};
+    int _selectedSprite{-1};
+    std::vector<std::string> _spriteLibrary;
+    std::set<std::string> _spriteFavorites;
+    char _spriteLibraryPath[2048]{};
+    char _spriteFolderPath[2048]{};
     bool _hardCut{false};
     char _presetPath[2048]{};
     char _status[256]{};
