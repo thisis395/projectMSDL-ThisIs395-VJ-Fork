@@ -99,3 +99,24 @@ foreach(texture_dir ${TEXTURE_DIRS})
             REGEX "(^|/)[.][^.]*" EXCLUDE
             )
 endforeach()
+
+# Deliver the offline renderer and its runtime driver alongside the application.
+# FFmpeg itself is installed on demand through the user-triggered setup script.
+if(TARGET projectMSDL-offline)
+    install(TARGETS projectMSDL-offline
+            RUNTIME DESTINATION ${PROJECTMSDL_BIN_DIR}
+            COMPONENT projectMSDL)
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT ENABLE_FLAT_PACKAGE)
+    install(FILES tools/render_offline.py tools/setup_render_prereqs.sh
+            DESTINATION ${PROJECTMSDL_DATA_DIR}
+            COMPONENT projectMSDL)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    install(FILES tools/render_offline.py tools/setup_render_prereqs.ps1
+            DESTINATION ${PROJECTMSDL_BIN_DIR}
+            COMPONENT projectMSDL)
+else()
+    install(FILES tools/render_offline.py tools/setup_render_prereqs.sh
+            DESTINATION ${PROJECTMSDL_BIN_DIR}
+            COMPONENT projectMSDL)
+endif()

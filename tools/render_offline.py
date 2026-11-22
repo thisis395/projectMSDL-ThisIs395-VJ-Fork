@@ -3,6 +3,9 @@
 import argparse
 import json
 import math
+import os
+import tempfile
+import time
 from pathlib import Path
 import shutil
 import subprocess
@@ -26,8 +29,17 @@ def load_job(path):
         dest = path.parent / dest
     if dest.exists() or not dest.parent.is_dir():
         raise ValueError("Output already exists or destination directory is missing")
-    if job["tracks"].get("sprites"):
-        raise ValueError("Sprites cannot be rendered yet; remove sprite clips")
+    sprites = []
+    for item in job["tracks"].get("sprites", []):
+        src = Path(item["path"]).expanduser()
+        if not src.is_absolute():
+            src = path.parent / src
+        if not src.is_file() or src.suffix.lower() != ".png":
+            raise ValueError("Missing or invalid sprite PNG: " + str(src))
+        start, dur, fade = (float(item.get(k, 0)) for k in ("startSeconds", "durationSeconds", "fadeSeconds"))
+        if not all(math.isfinite(v) for v in (start, dur, fade)) or start < 0 or dur <= 0 or fade < 0:
+            raise ValueError("Invalid sprite timing")
+        sprites.append((start, dur, fade, str(src)))
     presets = []
     for item in job["tracks"].get("presets", []):
         src = Path(item["path"]).expanduser()
@@ -72,61 +84,113 @@ def load_job(path):
     bitrate = int(out.get("bitrateMbps", 18))
     if not 1 <= bitrate <= 500:
         raise ValueError("Invalid bitrate")
+    if sprites:
+        length = max(length, max(s[0] + s[1] for s in sprites))
     return locals()
 
 
-def render(job, backend, ffmpeg):
-    cmd = [backend, "--width", str(job["width"]), "--height", str(job["height"]),
-           "--fps", str(job["fps"]), "--duration", f'{job["length"]:.6f}']
-    for start, duration, fade, path in job["presets"]:
-        cmd += ["--preset", f"{start:.6f}|{duration:.6f}|{fade:.6f}|{path}"]
-    encode = [ffmpeg, "-hide_banner", "-loglevel", "warning", "-nostdin", "-n",
-              "-f", "rawvideo", "-pixel_format", "rgb24",
-              "-video_size", f'{job["width"]}x{job["height"]}',
-              "-framerate", str(job["fps"]), "-i", "pipe:0"]
-    if job["audio_src"]:
-        encode += ["-i", str(job["audio_src"]), "-filter_complex",
-                   f"[1:a]atrim=0:{job['audio_length']:.6f},asetpts=PTS-STARTPTS,"
-                   f"volume={job['gain']:.6f},adelay={round(job['audio_start']*1000)}:all=1[a]",
-                   "-map", "0:v:0", "-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
-    else:
-        encode += ["-map", "0:v:0", "-an"]
-    codec = job["codec"]
-    if codec == "h264":
-        encode += ["-c:v", "libx264", "-pix_fmt", "yuv420p",
-                   "-b:v", str(job["bitrate"]) + "M"]
-    elif codec == "hevc":
-        encode += ["-c:v", "libx265", "-pix_fmt", "yuv420p",
-                   "-b:v", str(job["bitrate"]) + "M", "-tag:v", "hvc1"]
-    else:
-        encode += ["-c:v", "prores_ks", "-profile:v", "2", "-pix_fmt", "yuv422p10le"]
-    encode += ["-vf", "vflip", "-t", f'{job["length"]:.6f}', str(job["dest"])]
+def write_status(path, state, **fields):
+    if path is None:
+        return
+    payload = {"state": state, **fields}
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temp, path)
 
-    producer = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+
+def render(job, backend, ffmpeg, status=None, cancel=None):
+    # Decode once to f32le stereo 48 kHz for projectM's FFT, using the same audio
+    # track and trim parameters as the output mux. Never interpret arbitrary
+    # source audio file bytes as PCM samples.
+    pcm_path = None
+    producer = None
+    consumer = None
+    total_frames = math.ceil(job["length"] * job["fps"] - 1e-9)
+    expected_bytes = total_frames * job["width"] * job["height"] * 3
+    transferred = 0
     try:
+        cmd = [backend, "--width", str(job["width"]), "--height", str(job["height"]),
+               "--fps", str(job["fps"]), "--duration", f'{job["length"]:.6f}']
+        for start, duration, fade, source in job["presets"]:
+            cmd += ["--preset", f"{start:.6f}|{duration:.6f}|{fade:.6f}|{source}"]
+        for start, duration, fade, source in job["sprites"]:
+            cmd += ["--sprite", f"{start:.6f}|{duration:.6f}|{fade:.6f}|{source}"]
+
+        if job["audio_src"]:
+            with tempfile.NamedTemporaryFile(prefix="thisis395-fft-", suffix=".f32", delete=False) as raw:
+                pcm_path = Path(raw.name)
+            decode = [ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+                      "-i", str(job["audio_src"]), "-t", f'{job["audio_length"]:.6f}',
+                      "-vn", "-f", "f32le", "-acodec", "pcm_f32le", "-ar", "48000",
+                      "-ac", "2", str(pcm_path)]
+            write_status(status, "preparing_audio")
+            subprocess.run(decode, check=True)
+            cmd += ["--pcm", str(pcm_path), "--audio-start", str(job["audio_start"]),
+                    "--audio-gain", str(job["gain"])]
+
+        encode = [ffmpeg, "-hide_banner", "-loglevel", "warning", "-nostdin", "-n",
+                  "-f", "rawvideo", "-pixel_format", "rgb24",
+                  "-video_size", f'{job["width"]}x{job["height"]}',
+                  "-framerate", str(job["fps"]), "-i", "pipe:0"]
+        if job["audio_src"]:
+            encode += ["-i", str(job["audio_src"]), "-filter_complex",
+                       f"[1:a]atrim=0:{job['audio_length']:.6f},asetpts=PTS-STARTPTS,"
+                       f"volume={job['gain']:.6f},adelay={round(job['audio_start'] * 1000)}:all=1[a]",
+                       "-map", "0:v:0", "-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        else:
+            encode += ["-map", "0:v:0", "-an"]
+        codec = job["codec"]
+        if codec == "h264":
+            encode += ["-c:v", "libx264", "-pix_fmt", "yuv420p",
+                       "-b:v", str(job["bitrate"]) + "M"]
+        elif codec == "hevc":
+            encode += ["-c:v", "libx265", "-pix_fmt", "yuv420p",
+                       "-b:v", str(job["bitrate"]) + "M", "-tag:v", "hvc1"]
+        else:
+            encode += ["-c:v", "prores_ks", "-profile:v", "2", "-pix_fmt", "yuv422p10le"]
+        encode += ["-vf", "vflip", "-t", f'{job["length"]:.6f}', str(job["dest"])]
+
+        write_status(status, "rendering", progress=0.0)
+        producer = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         consumer = subprocess.Popen(encode, stdin=subprocess.PIPE)
-        try:
-            while True:
-                data = producer.stdout.read(1048576)
-                if not data:
-                    break
-                consumer.stdin.write(data)
-            consumer.stdin.close()
-            producer.stdout.close()
-            a, b = producer.wait(), consumer.wait()
-            if a or b:
-                raise RuntimeError(f"Native projectM returned {a}, FFmpeg returned {b}")
-        except BaseException:
-            consumer.kill()
-            consumer.wait()
-            raise
-    except BaseException:
-        producer.kill()
-        producer.wait()
+        last_report = 0
+        assert producer.stdout and consumer.stdin
+        while True:
+            if cancel and cancel.exists():
+                raise InterruptedError("Render cancelled")
+            data = producer.stdout.read(1048576)
+            if not data:
+                break
+            consumer.stdin.write(data)
+            transferred += len(data)
+            if time.monotonic() - last_report >= 0.5:
+                write_status(status, "rendering", progress=min(1.0, transferred / expected_bytes))
+                last_report = time.monotonic()
+        consumer.stdin.close()
+        producer.stdout.close()
+        a = producer.wait()
+        b = consumer.wait()
+        if a or b or transferred != expected_bytes:
+            raise RuntimeError(f"Export failed (projectM={a}, FFmpeg={b}, "
+                               f"RGB bytes={transferred}/{expected_bytes})")
+        if not job["dest"].is_file() or job["dest"].stat().st_size == 0:
+            raise RuntimeError("FFmpeg finished without producing a nonempty output")
+        write_status(status, "completed", progress=1.0, output=str(job["dest"]))
+        print("Rendered:", job["dest"])
+    except BaseException as exc:
+        write_status(status, "cancelled" if isinstance(exc, InterruptedError) else "failed",
+                     error=str(exc))
+        for process in (consumer, producer):
+            if process and process.poll() is None:
+                process.kill()
+            if process:
+                process.wait()
         if job["dest"].exists():
             job["dest"].unlink()
         raise
-    print("Rendered:", job["dest"])
+    finally:
+        if pcm_path is not None:
+            pcm_path.unlink(missing_ok=True)
 
 
 def main():
@@ -134,14 +198,20 @@ def main():
     p.add_argument("manifest", type=Path)
     p.add_argument("--backend", default="projectMSDL-offline")
     p.add_argument("--ffmpeg", default="ffmpeg")
+    p.add_argument("--status", type=Path, help="Machine-readable render status JSON")
+    p.add_argument("--cancel", type=Path, help="Cancellation marker file")
     args = p.parse_args()
     try:
+        if args.cancel and args.cancel.exists():
+            args.cancel.unlink()
+        write_status(args.status, "validating")
         job = load_job(args.manifest.expanduser().resolve())
         for binary in (args.backend, args.ffmpeg):
             if not shutil.which(binary):
                 raise ValueError("Executable not found: " + binary)
-        render(job, args.backend, args.ffmpeg)
+        render(job, args.backend, args.ffmpeg, args.status, args.cancel)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
+        write_status(args.status, "failed", error=str(exc))
         print("Offline render error:", exc, file=sys.stderr)
         return 1
     return 0

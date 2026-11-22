@@ -8,6 +8,8 @@
 #include <Poco/Path.h>
 #include <Poco/DirectoryIterator.h>
 #include <Poco/String.h>
+#include <Poco/Process.h>
+#include <Poco/Exception.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -631,9 +633,10 @@ std::string EscapeRenderJson(const std::string& input)
 
 void PlaylistWindow::DrawRenderTab()
 {
+    PollRenderStatus();
     ImGui::TextUnformatted("Render workspace");
     ImGui::SameLine();
-    ImGui::TextDisabled("NLE-style job planning; offline MP4 rendering is not implemented.");
+    ImGui::TextDisabled("Experimental FFmpeg export: local renderer + encoder required.");
     ImGui::Separator();
 
     const float available = ImGui::GetContentRegionAvail().x;
@@ -734,7 +737,7 @@ void PlaylistWindow::DrawRenderTab()
     ImGui::Separator();
     ImGui::TextUnformatted("RENDER QUEUE / JOB");
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##renderAudio", "Audio track source file path (not yet decoded)", _renderAudioPath, sizeof(_renderAudioPath));
+    ImGui::InputTextWithHint("##renderAudio", "Audio track source file path (drives FFT + output)", _renderAudioPath, sizeof(_renderAudioPath));
     ImGui::SetNextItemWidth(125);
     ImGui::InputFloat("Audio start (s)", &_renderAudioStart, 1.0f, 5.0f, "%.2f");
     _renderAudioStart = std::max(0.0f, _renderAudioStart);
@@ -752,7 +755,25 @@ void PlaylistWindow::DrawRenderTab()
     if (ImGui::Button("Save render job (.json)"))
         SaveRenderJob();
     ImGui::SameLine();
-    ImGui::TextDisabled("Queue/encode disabled until offline renderer exists.");
+    ImGui::Separator();
+    if (ImGui::Button("Install / repair render prerequisites"))
+        SetupRenderPrerequisites();
+    ImGui::SameLine();
+    if (ImGui::Button("Render video with FFmpeg"))
+        LaunchOfflineRender();
+    if (_renderRunning)
+    {
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel render"))
+        {
+            const std::string cancelPath = std::string(_renderJobPath) + ".cancel";
+            std::ofstream out(cancelPath, std::ios::binary);
+            if (out) std::snprintf(_renderStatus, sizeof(_renderStatus), "Cancellation requested.");
+        }
+        ImGui::ProgressBar(_renderProgress, ImVec2(-1.0f, 0.0f));
+    }
+    ImGui::TextDisabled("Setup may install Python and FFmpeg via your OS package manager.");
+    ImGui::TextDisabled("Render runs as a separate process; see its console for progress/errors.");
     if (_renderStatus[0])
         ImGui::TextWrapped("%s", _renderStatus);
 }
@@ -853,7 +874,7 @@ void PlaylistWindow::DrawRenderTimeline()
     ImGui::EndChild();
 }
 
-void PlaylistWindow::SaveRenderJob()
+void PlaylistWindow::SaveRenderJob(bool replaceExisting)
 {
     const std::string path(_renderJobPath);
     if (path.size() < 5 || path.substr(path.size() - 5) != ".json")
@@ -867,7 +888,7 @@ void PlaylistWindow::SaveRenderJob()
         return;
     }
     std::ifstream existing(path, std::ios::binary);
-    if (existing.good())
+    if (existing.good() && !replaceExisting)
     {
         std::snprintf(_renderStatus, sizeof(_renderStatus), "Job file exists; choose a different filename.");
         return;
@@ -880,7 +901,7 @@ void PlaylistWindow::SaveRenderJob()
     }
     out << std::fixed << std::setprecision(3);
     out << "{\n  \"schema\": \"thisis395.render-job.v1\",\n";
-    out << "  \"status\": \"planned\",\n  \"encoderImplemented\": false,\n";
+    out << "  \"status\": \"planned\",\n  \"encoderImplemented\": true,\n";
     out << "  \"output\": {\"path\": \"" << EscapeRenderJson(_renderVideoPath)
         << "\", \"width\": " << _renderWidth << ", \"height\": " << _renderHeight
         << ", \"fps\": " << _renderFps << ", \"codec\": \""
@@ -921,4 +942,141 @@ void PlaylistWindow::SaveRenderJob()
     out.close();
     std::snprintf(_renderStatus, sizeof(_renderStatus), "%s",
                   out ? "Render job saved (JSON only, no video generated)." : "Failed to write complete render job.");
+}
+
+void PlaylistWindow::SetupRenderPrerequisites()
+{
+    const std::string base = Poco::Path(Poco::Util::Application::instance().commandPath()).parent().toString();
+    Poco::Path script(base);
+#if defined(_WIN32)
+    script.append("setup_render_prereqs.ps1");
+    const std::string program = "powershell.exe";
+    const std::vector<std::string> args = {"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.toString()};
+#else
+# if defined(__APPLE__)
+    script = Poco::Path(base).parent().append("Resources").append("setup_render_prereqs.sh");
+# else
+    script.append("setup_render_prereqs.sh");
+# endif
+    const std::string program = "/bin/sh";
+    const std::vector<std::string> args = {script.toString()};
+#endif
+    if (!Poco::File(script).exists())
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Prerequisite setup script not packaged.");
+        return;
+    }
+    try
+    {
+        // Explicit user click only. Never invoke installation from startup or passive UI updates.
+        Poco::Process::launch(program, args);
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Setup launched. Check package-manager prompts; restart the app when finished.");
+    }
+    catch (const Poco::Exception&)
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Could not launch setup. See docs/ThisIs395_One_Click_Render.md.");
+    }
+}
+
+void PlaylistWindow::LaunchOfflineRender()
+{
+    if (_renderRunning)
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "A render is already running.");
+        return;
+    }
+    if (_renderJobPath[0] == '\0')
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Set a render-job .json path first.");
+        return;
+    }
+    // Regenerate the manifest from the current timeline before launching the encoder.
+    SaveRenderJob(true);
+    if (std::strstr(_renderStatus, "Render job saved") == nullptr)
+        return;
+
+    const std::string base = Poco::Path(Poco::Util::Application::instance().commandPath()).parent().toString();
+    Poco::Path backend(base);
+    Poco::Path driver(base);
+#if defined(_WIN32)
+    backend.append("projectMSDL-offline.exe");
+    driver.append("render_offline.py");
+    const std::string program = "python.exe";
+#elif defined(__APPLE__)
+    backend.append("projectMSDL-offline");
+    driver = Poco::Path(base).parent().append("Resources").append("render_offline.py");
+    const std::string program = "python3";
+#else
+    backend.append("projectMSDL-offline");
+    driver.append("render_offline.py");
+    const std::string program = "python3";
+#endif
+    if (!Poco::File(backend).exists() || !Poco::File(driver).exists())
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Missing packaged renderer or driver; install an updated build.");
+        return;
+    }
+    try
+    {
+        const std::string statusFile = std::string(_renderJobPath) + ".status.json";
+        // Clear a previous render's result to avoid displaying stale success.
+        std::remove(statusFile.c_str());
+        _renderRunning = true;
+        _renderProgress = 0.0f;
+        Poco::Process::launch(program, {driver.toString(), _renderJobPath, "--backend",
+                                       backend.toString(), "--ffmpeg", "ffmpeg",
+                                       "--status", std::string(_renderJobPath) + ".status.json",
+                                       "--cancel", std::string(_renderJobPath) + ".cancel"});
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Encoder process launched; this does not confirm video export succeeded.");
+    }
+    catch (const Poco::Exception&)
+    {
+        _renderRunning = false;
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Could not launch Python. Run prerequisite setup, then restart the app.");
+    }
+}
+
+void PlaylistWindow::PollRenderStatus()
+{
+    if (!_renderRunning || _renderJobPath[0] == '\0')
+        return;
+    const uint64_t now = SDL_GetTicks64();
+    if (now - _renderLastPoll < 500)
+        return;
+    _renderLastPoll = now;
+    const std::string filename = std::string(_renderJobPath) + ".status.json";
+    std::ifstream in(filename, std::ios::binary);
+    if (!in) return;
+    std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (data.find("\"state\": \"completed\"") != std::string::npos)
+    {
+        _renderRunning = false;
+        _renderProgress = 1.0f;
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Video export completed successfully.");
+    }
+    else if (data.find("\"state\": \"failed\"") != std::string::npos)
+    {
+        _renderRunning = false;
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Rendering failed. See the status JSON next to the job file.");
+    }
+    else if (data.find("\"state\": \"cancelled\"") != std::string::npos)
+    {
+        _renderRunning = false;
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Render cancelled.");
+    }
+    else if (data.find("\"state\": \"rendering\"") != std::string::npos)
+    {
+        const auto key = data.find("\"progress\": ");
+        if (key != std::string::npos)
+            _renderProgress = std::max(0.0f, std::min(1.0f,
+                static_cast<float>(std::strtod(data.c_str() + key + 12, nullptr))));
+    }
+    else if (data.find("\"state\": \"preparing_audio\"") != std::string::npos)
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Preparing audio FFT source...");
 }
