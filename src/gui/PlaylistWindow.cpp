@@ -8,6 +8,8 @@
 #include <Poco/Path.h>
 #include <Poco/DirectoryIterator.h>
 #include <Poco/String.h>
+#include <Poco/Process.h>
+#include <Poco/Exception.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -633,7 +635,7 @@ void PlaylistWindow::DrawRenderTab()
 {
     ImGui::TextUnformatted("Render workspace");
     ImGui::SameLine();
-    ImGui::TextDisabled("NLE-style job planning; offline MP4 rendering is not implemented.");
+    ImGui::TextDisabled("Experimental FFmpeg export: local renderer + encoder required.");
     ImGui::Separator();
 
     const float available = ImGui::GetContentRegionAvail().x;
@@ -752,7 +754,14 @@ void PlaylistWindow::DrawRenderTab()
     if (ImGui::Button("Save render job (.json)"))
         SaveRenderJob();
     ImGui::SameLine();
-    ImGui::TextDisabled("Queue/encode disabled until offline renderer exists.");
+    ImGui::Separator();
+    if (ImGui::Button("Install / repair render prerequisites"))
+        SetupRenderPrerequisites();
+    ImGui::SameLine();
+    if (ImGui::Button("Render video with FFmpeg"))
+        LaunchOfflineRender();
+    ImGui::TextDisabled("Setup may install Python and FFmpeg via your OS package manager.");
+    ImGui::TextDisabled("Render runs as a separate process; see its console for progress/errors.");
     if (_renderStatus[0])
         ImGui::TextWrapped("%s", _renderStatus);
 }
@@ -921,4 +930,88 @@ void PlaylistWindow::SaveRenderJob()
     out.close();
     std::snprintf(_renderStatus, sizeof(_renderStatus), "%s",
                   out ? "Render job saved (JSON only, no video generated)." : "Failed to write complete render job.");
+}
+
+void PlaylistWindow::SetupRenderPrerequisites()
+{
+    const std::string base = Poco::Path(Poco::Util::Application::instance().commandPath()).parent().toString();
+    Poco::Path script(base);
+#if defined(_WIN32)
+    script.append("setup_render_prereqs.ps1");
+    const std::string program = "powershell.exe";
+    const std::vector<std::string> args = {"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.toString()};
+#else
+# if defined(__APPLE__)
+    script = Poco::Path(base).parent().append("Resources").append("setup_render_prereqs.sh");
+# else
+    script.append("setup_render_prereqs.sh");
+# endif
+    const std::string program = "/bin/sh";
+    const std::vector<std::string> args = {script.toString()};
+#endif
+    if (!Poco::File(script).exists())
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Prerequisite setup script not packaged.");
+        return;
+    }
+    try
+    {
+        // Explicit user click only. Never invoke installation from startup or passive UI updates.
+        Poco::Process::launch(program, args);
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Setup launched. Check package-manager prompts; restart the app when finished.");
+    }
+    catch (const Poco::Exception&)
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Could not launch setup. See docs/ThisIs395_One_Click_Render.md.");
+    }
+}
+
+void PlaylistWindow::LaunchOfflineRender()
+{
+    if (_renderJobPath[0] == '\0')
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Set a render-job .json path first.");
+        return;
+    }
+    // Regenerate the manifest from the current timeline before launching the encoder.
+    SaveRenderJob();
+    if (std::strstr(_renderStatus, "Render job saved") == nullptr)
+        return;
+
+    const std::string base = Poco::Path(Poco::Util::Application::instance().commandPath()).parent().toString();
+    Poco::Path backend(base);
+    Poco::Path driver(base);
+#if defined(_WIN32)
+    backend.append("projectMSDL-offline.exe");
+    driver.append("render_offline.py");
+    const std::string program = "python.exe";
+#elif defined(__APPLE__)
+    backend.append("projectMSDL-offline");
+    driver = Poco::Path(base).parent().append("Resources").append("render_offline.py");
+    const std::string program = "python3";
+#else
+    backend.append("projectMSDL-offline");
+    driver.append("render_offline.py");
+    const std::string program = "python3";
+#endif
+    if (!Poco::File(backend).exists() || !Poco::File(driver).exists())
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Missing packaged renderer or driver; install an updated build.");
+        return;
+    }
+    try
+    {
+        Poco::Process::launch(program, {driver.toString(), _renderJobPath, "--backend",
+                                       backend.toString(), "--ffmpeg", "ffmpeg"});
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Encoder process launched; this does not confirm video export succeeded.");
+    }
+    catch (const Poco::Exception&)
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Could not launch Python. Run prerequisite setup, then restart the app.");
+    }
 }

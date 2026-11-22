@@ -25,6 +25,8 @@ private:
     void DrawRenderTab();
     void DrawRenderTimeline();
     void SaveRenderJob();
+    void SetupRenderPrerequisites();
+    void LaunchOfflineRender();
     void DrawSequenceTab();
     void DrawSequenceClips(bool sprites);
     void UpdateSequence();
