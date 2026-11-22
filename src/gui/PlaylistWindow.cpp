@@ -4,6 +4,10 @@
 #include "imgui.h"
 
 #include <Poco/Util/Application.h>
+#include <Poco/File.h>
+#include <Poco/Path.h>
+#include <Poco/DirectoryIterator.h>
+#include <Poco/String.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -39,7 +43,20 @@ void PlaylistWindow::Draw()
         {
             if (ImGui::BeginTabItem("Playlist"))
             {
-                DrawPlaylistTab();
+                if (ImGui::BeginTabBar("LibraryTypes"))
+                {
+                    if (ImGui::BeginTabItem("Presets"))
+                    {
+                        DrawPlaylistTab();
+                        ImGui::EndTabItem();
+                    }
+                    if (ImGui::BeginTabItem("Sprites"))
+                    {
+                        DrawSpriteLibraryTab();
+                        ImGui::EndTabItem();
+                    }
+                    ImGui::EndTabBar();
+                }
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Sequence"))
@@ -190,6 +207,139 @@ void PlaylistWindow::DrawPlaylistTab()
     }
 }
 
+
+
+void PlaylistWindow::ImportSpriteLibraryPath(const std::string& path, bool directory)
+{
+    // Library entries are references only; importing never creates a live projectM sprite.
+    try
+    {
+        Poco::File input(path);
+        if (!input.exists())
+        {
+            std::snprintf(_status, sizeof(_status), "Sprite path does not exist.");
+            return;
+        }
+        std::size_t added = 0;
+        const auto insertFile = [this, &added](const std::string& filename)
+        {
+            Poco::File file(filename);
+            Poco::Path filePath(filename);
+            if (!file.isFile() || !file.canRead() || Poco::icompare(filePath.getExtension(), "png") != 0)
+                return;
+            const std::string absolute = filePath.absolute().toString();
+            if (std::find(_spriteLibrary.begin(), _spriteLibrary.end(), absolute) == _spriteLibrary.end())
+            {
+                _spriteLibrary.push_back(absolute);
+                ++added;
+            }
+        };
+        if (directory)
+        {
+            if (!input.isDirectory())
+            {
+                std::snprintf(_status, sizeof(_status), "Choose a sprite folder.");
+                return;
+            }
+            // Intentionally non-recursive: a user can import subfolders separately.
+            for (Poco::DirectoryIterator it(path), end; it != end; ++it)
+                if (_spriteLibrary.size() < 10000)
+                    insertFile(it.path().toString());
+        }
+        else
+        {
+            insertFile(path);
+        }
+        std::sort(_spriteLibrary.begin(), _spriteLibrary.end());
+        std::snprintf(_status, sizeof(_status), "Imported %zu PNG sprite(s).", added);
+    }
+    catch (const Poco::Exception&)
+    {
+        std::snprintf(_status, sizeof(_status), "Unable to read the sprite file or folder.");
+    }
+}
+
+void PlaylistWindow::DrawSpriteLibraryTab()
+{
+    ImGui::Text("%zu sprites in library", _spriteLibrary.size());
+    ImGui::SameLine();
+    ImGui::TextDisabled("Choose a PNG and press + to add it to Sequence.");
+    ImGui::Separator();
+
+    ImGui::BeginChild("SpriteLibraryList", ImVec2(0, -190), true);
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(_spriteLibrary.size()));
+    while (clipper.Step())
+    {
+        for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index)
+        {
+            const std::string path = _spriteLibrary[static_cast<std::size_t>(index)];
+            const auto slash = path.find_last_of("/\\");
+            const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+            ImGui::PushID(index);
+            if (ImGui::Selectable((name + "##sprite").c_str(), _selectedSprite == index))
+                _selectedSprite = index;
+            ImGui::SameLine();
+            if (ImGui::SmallButton(_spriteFavorites.count(path) ? "*" : "Star"))
+            {
+                if (!_spriteFavorites.erase(path))
+                    _spriteFavorites.insert(path);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("+"))
+            {
+                SequenceClip clip;
+                clip.path = path;
+                clip.sprite = true;
+                clip.duration = _defaultDuration;
+                clip.fade = _defaultFade;
+                _sequence.push_back(clip);
+                std::snprintf(_status, sizeof(_status), "Added sprite to sequence.");
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", path.c_str());
+            ImGui::PopID();
+        }
+    }
+    ImGui::EndChild();
+
+    if (ImGui::Button("Add selected to sequence") &&
+        _selectedSprite >= 0 && static_cast<std::size_t>(_selectedSprite) < _spriteLibrary.size())
+    {
+        SequenceClip clip;
+        clip.path = _spriteLibrary[static_cast<std::size_t>(_selectedSprite)];
+        clip.sprite = true;
+        clip.duration = _defaultDuration;
+        clip.fade = _defaultFade;
+        _sequence.push_back(clip);
+        std::snprintf(_status, sizeof(_status), "Added sprite to sequence.");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Remove from library") &&
+        _selectedSprite >= 0 && static_cast<std::size_t>(_selectedSprite) < _spriteLibrary.size())
+    {
+        _spriteFavorites.erase(_spriteLibrary[static_cast<std::size_t>(_selectedSprite)]);
+        _spriteLibrary.erase(_spriteLibrary.begin() + _selectedSprite);
+        _selectedSprite = -1;
+    }
+
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##spriteLibraryPath", "Full path to a PNG sprite", _spriteLibraryPath, sizeof(_spriteLibraryPath));
+    if (ImGui::Button("Add PNG to library") && _spriteLibraryPath[0])
+    {
+        ImportSpriteLibraryPath(_spriteLibraryPath, false);
+        _spriteLibraryPath[0] = '\0';
+    }
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##spriteFolderPath", "Full path to a folder of PNG sprites", _spriteFolderPath, sizeof(_spriteFolderPath));
+    if (ImGui::Button("Import sprite folder") && _spriteFolderPath[0])
+    {
+        ImportSpriteLibraryPath(_spriteFolderPath, true);
+        _spriteFolderPath[0] = '\0';
+    }
+    if (_status[0]) ImGui::TextWrapped("%s", _status);
+    ImGui::TextDisabled("Sprite library is in-memory this session. Sequence sprite playback/rendering is a separate milestone.");
+}
 
 void PlaylistWindow::DrawSequenceTab()
 {
