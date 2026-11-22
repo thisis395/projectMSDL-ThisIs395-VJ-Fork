@@ -19,10 +19,16 @@ public:
 
 private:
     void DrawPlaylistTab();
+    void DrawSpriteLibraryTab();
+    void ImportSpriteLibraryPath(const std::string& path, bool directory);
     void DrawExportTab();
+    void DrawRenderTab();
+    void DrawRenderTimeline();
+    void SaveRenderJob();
     void DrawSequenceTab();
     void DrawSequenceClips(bool sprites);
     void UpdateSequence();
+    bool CueSequencePreset(std::size_t index);
 
     struct SequenceClip
     {
@@ -35,6 +41,11 @@ private:
     ProjectMWrapper& _projectMWrapper;
     bool _visible{false};
     int _selected{-1};
+    int _selectedSprite{-1};
+    std::vector<std::string> _spriteLibrary;
+    std::set<std::string> _spriteFavorites;
+    char _spriteLibraryPath[2048]{};
+    char _spriteFolderPath[2048]{};
     bool _hardCut{false};
     char _presetPath[2048]{};
     char _status[256]{};
@@ -47,4 +58,20 @@ private:
     std::size_t _sequencePosition{0};
     uint64_t _sequenceStarted{0};
     bool _sequencePlaying{false};
+    bool _sequenceLocked{false};
+    int _renderSelected{-1};
+    double _renderPlayhead{0.0};
+    float _renderPixelsPerSecond{14.0f};
+    int _renderWidth{1920};
+    int _renderHeight{1080};
+    int _renderFps{60};
+    int _renderCodec{0};
+    int _renderBitrateMbps{18};
+    char _renderJobPath[2048]{};
+    char _renderVideoPath[2048]{};
+    char _renderAudioPath[2048]{};
+    float _renderAudioStart{0.0f};
+    float _renderAudioDuration{180.0f};
+    float _renderAudioGain{1.0f};
+    char _renderStatus[256]{};
 };
