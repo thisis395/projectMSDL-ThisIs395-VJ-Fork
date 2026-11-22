@@ -737,7 +737,7 @@ void PlaylistWindow::DrawRenderTab()
     ImGui::Separator();
     ImGui::TextUnformatted("RENDER QUEUE / JOB");
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##renderAudio", "Audio track source file path (not yet decoded)", _renderAudioPath, sizeof(_renderAudioPath));
+    ImGui::InputTextWithHint("##renderAudio", "Audio track source file path (drives FFT + output)", _renderAudioPath, sizeof(_renderAudioPath));
     ImGui::SetNextItemWidth(125);
     ImGui::InputFloat("Audio start (s)", &_renderAudioStart, 1.0f, 5.0f, "%.2f");
     _renderAudioStart = std::max(0.0f, _renderAudioStart);
@@ -901,7 +901,7 @@ void PlaylistWindow::SaveRenderJob(bool replaceExisting)
     }
     out << std::fixed << std::setprecision(3);
     out << "{\n  \"schema\": \"thisis395.render-job.v1\",\n";
-    out << "  \"status\": \"planned\",\n  \"encoderImplemented\": false,\n";
+    out << "  \"status\": \"planned\",\n  \"encoderImplemented\": true,\n";
     out << "  \"output\": {\"path\": \"" << EscapeRenderJson(_renderVideoPath)
         << "\", \"width\": " << _renderWidth << ", \"height\": " << _renderHeight
         << ", \"fps\": " << _renderFps << ", \"codec\": \""
@@ -982,6 +982,11 @@ void PlaylistWindow::SetupRenderPrerequisites()
 
 void PlaylistWindow::LaunchOfflineRender()
 {
+    if (_renderRunning)
+    {
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "A render is already running.");
+        return;
+    }
     if (_renderJobPath[0] == '\0')
     {
         std::snprintf(_renderStatus, sizeof(_renderStatus), "Set a render-job .json path first.");
@@ -1016,6 +1021,9 @@ void PlaylistWindow::LaunchOfflineRender()
     }
     try
     {
+        const std::string statusFile = std::string(_renderJobPath) + ".status.json";
+        // Clear a previous render's result to avoid displaying stale success.
+        std::remove(statusFile.c_str());
         _renderRunning = true;
         _renderProgress = 0.0f;
         Poco::Process::launch(program, {driver.toString(), _renderJobPath, "--backend",
