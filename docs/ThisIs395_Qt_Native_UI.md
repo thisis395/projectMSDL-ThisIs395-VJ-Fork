@@ -73,3 +73,23 @@ No TCP port is opened. This mailbox is a simple local prototype, not a productio
 4. Kill the renderer; verify clean timeout and restart behavior.
 5. Check build and runtime behavior on Windows, macOS, and Linux, particularly QTemporaryDir permissions and Poco file-renaming behavior.
 6. Add integration tests and robust persistence/restart logic before retiring the old UI.
+
+
+## Downloadable Qt6 standalone artifacts
+
+`.github/workflows/native-ui-check.yml` now builds an independent Qt6 native executable
+using `src/native/standalone/CMakeLists.txt` on Windows x64, macOS Intel and Linux x64.
+Unlike the SDL build check, this workflow is intended to produce **Qt UI downloads**:
+
+- `ThisIs395-VJ-NativeUI-windows-x64`: executable, required Qt DLLs, and the Windows platform plugin from `windeployqt`.
+- `ThisIs395-VJ-NativeUI-macos-intel`: unsigned `.app` with Qt frameworks via `macdeployqt`.
+- `ThisIs395-VJ-NativeUI-linux-x64`: AppImage using linuxdeploy and the Qt deployment plugin.
+
+These are **Qt control-center artifacts**, not complete bundled SDL/projectM+FFmpeg workstations.
+The Qt UI still requires a separately built or installed `projectMSDL`/`projectM`
+visualizer binary to launch live rendering. On macOS the user may need to grant
+Gatekeeper approval for unsigned development packages. GitHub Actions artifact
+retention is set to 30 days.
+
+The workflow has been committed; **do not claim download availability or successful
+packaging until the corresponding GitHub Actions run completes**.
