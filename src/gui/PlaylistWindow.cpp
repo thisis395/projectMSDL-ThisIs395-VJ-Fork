@@ -37,17 +37,14 @@ void PlaylistWindow::Draw()
     {
         if (ImGui::BeginTabBar("PlaylistTabs"))
         {
-            if (ImGui::BeginTabItem("Playlist + Sequence"))
+            if (ImGui::BeginTabItem("Playlist"))
             {
-                const float available = ImGui::GetContentRegionAvail().x;
-                const float leftWidth = std::max(320.0f, available * 0.42f);
-                ImGui::BeginChild("SequencePanel", ImVec2(leftWidth, 0), true);
-                DrawSequenceTab();
-                ImGui::EndChild();
-                ImGui::SameLine();
-                ImGui::BeginChild("LibraryPanel", ImVec2(0, 0), true);
                 DrawPlaylistTab();
-                ImGui::EndChild();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Sequence"))
+            {
+                DrawSequenceTab();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Render"))
@@ -234,25 +231,54 @@ void PlaylistWindow::DrawSequenceTab()
     }
     ImGui::Separator();
     ImGui::Text("%zu clips across both tracks", _sequence.size());
-    if (ImGui::Button("Play preset sequence"))
+    if (ImGui::Button("Previous"))
     {
-        if (_sequence.empty())
+        std::size_t position = _sequencePosition < _sequence.size() ? _sequencePosition : _sequence.size();
+        while (position > 0)
         {
-            std::snprintf(_status, sizeof(_status), "Add presets to the sequence first.");
-        }
-        else
-        {
-            _sequencePlaying = true;
-            _sequencePosition = 0;
-            _sequenceStarted = 0;
+            --position;
+            if (!_sequence[position].sprite)
+            {
+                CueSequencePreset(position);
+                break;
+            }
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Stop sequence"))
+    if (ImGui::Button(_sequencePlaying ? "Restart" : "Play sequence"))
+    {
+        _sequencePlaying = true;
+        _sequencePosition = 0;
+        _sequenceStarted = 0;
+        // The frame updater will cue the first preset.
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Next"))
+    {
+        for (std::size_t index = _sequencePosition < _sequence.size() ? _sequencePosition + 1 : 0;
+             index < _sequence.size(); ++index)
+        {
+            if (!_sequence[index].sprite)
+            {
+                CueSequencePreset(index);
+                break;
+            }
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Stop"))
     {
         _sequencePlaying = false;
         _sequenceStarted = 0;
     }
+    if (ImGui::Checkbox("Lock preset", &_sequenceLocked))
+    {
+        // A sequence lock pauses *automatic* advancement; manual Previous/Next still work.
+        if (!_sequenceLocked && _sequencePlaying)
+            _sequenceStarted = SDL_GetTicks64();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled(_sequenceLocked ? "Auto-advance paused" : "Auto-advance enabled");
     ImGui::TextDisabled("Preset playback is functional. Sprite clips are staged but not rendered.");
     ImGui::TextDisabled("Fades apply to incoming preset transitions.");
 }
@@ -310,59 +336,59 @@ void PlaylistWindow::DrawSequenceClips(bool sprites)
     }
 }
 
-void PlaylistWindow::UpdateSequence()
+bool PlaylistWindow::CueSequencePreset(std::size_t index)
 {
-    if (!_sequencePlaying || _sequence.empty())
-        return;
-    if (_sequencePosition >= _sequence.size())
-    {
-        _sequencePlaying = false;
-        return;
-    }
-    const uint64_t now = SDL_GetTicks64();
-    if (_sequenceStarted != 0 &&
-        static_cast<double>(now - _sequenceStarted) < _sequence[_sequencePosition].duration * 1000.0)
-        return;
-
-    if (_sequenceStarted != 0)
-        ++_sequencePosition;
-    while (_sequencePosition < _sequence.size() && _sequence[_sequencePosition].sprite)
-        ++_sequencePosition;
-    if (_sequencePosition >= _sequence.size())
-    {
-        _sequencePlaying = false;
-        return;
-    }
-
+    if (index >= _sequence.size() || _sequence[index].sprite)
+        return false;
     auto* playlist = _projectMWrapper.Playlist();
-    const auto& path = _sequence[_sequencePosition].path;
+    if (!playlist)
+        return false;
+
+    const auto& clip = _sequence[index];
     const uint32_t count = projectm_playlist_size(playlist);
-    bool found = false;
     for (uint32_t i = 0; i < count; ++i)
     {
         char* item = projectm_playlist_item(playlist, i);
-        if (!item)
-            continue;
-        const bool matches = path == item;
+        if (!item) continue;
+        const bool matches = clip.path == item;
         projectm_playlist_free_string(item);
         if (matches)
         {
-            const float fadeSeconds = _sequence[_sequencePosition].fade;
-            projectm_set_soft_cut_duration(_projectMWrapper.ProjectM(), fadeSeconds);
-            projectm_playlist_set_position(playlist, i, _hardCut || fadeSeconds <= 0.0f);
-            found = true;
-            break;
+            const float fade = std::max(0.0f, clip.fade);
+            projectm_set_soft_cut_duration(_projectMWrapper.ProjectM(), fade);
+            projectm_playlist_set_position(playlist, i, _hardCut || fade <= 0.0f);
+            _sequencePosition = index;
+            _sequenceStarted = SDL_GetTicks64();
+            // Manual next/previous only cues. Play sequence starts/resumes automation.
+            return true;
         }
     }
-    if (!found)
+    std::snprintf(_status, sizeof(_status), "A sequence preset is missing from the live playlist.");
+    _sequencePlaying = false;
+    return false;
+}
+
+void PlaylistWindow::UpdateSequence()
+{
+    if (!_sequencePlaying || _sequence.empty() || _sequenceLocked)
+        return;
+
+    const uint64_t now = SDL_GetTicks64();
+    if (_sequenceStarted != 0 && _sequencePosition < _sequence.size() &&
+        static_cast<double>(now - _sequenceStarted) <
+            std::max(0.1f, _sequence[_sequencePosition].duration) * 1000.0)
+        return;
+
+    std::size_t next = _sequenceStarted == 0 ? _sequencePosition : _sequencePosition + 1;
+    while (next < _sequence.size() && _sequence[next].sprite)
+        ++next;
+    if (next >= _sequence.size())
     {
         _sequencePlaying = false;
-        std::snprintf(_status, sizeof(_status), "A sequence preset is missing from the live playlist.");
+        _sequenceStarted = 0;
+        return;
     }
-    else
-    {
-        _sequenceStarted = now;
-    }
+    CueSequencePreset(next);
 }
 
 void PlaylistWindow::DrawExportTab()
@@ -558,7 +584,17 @@ void PlaylistWindow::DrawRenderTab()
     ImGui::Separator();
     ImGui::TextUnformatted("RENDER QUEUE / JOB");
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##renderAudio", "Optional source audio file path", _renderAudioPath, sizeof(_renderAudioPath));
+    ImGui::InputTextWithHint("##renderAudio", "Audio track source file path (not yet decoded)", _renderAudioPath, sizeof(_renderAudioPath));
+    ImGui::SetNextItemWidth(125);
+    ImGui::InputFloat("Audio start (s)", &_renderAudioStart, 1.0f, 5.0f, "%.2f");
+    _renderAudioStart = std::max(0.0f, _renderAudioStart);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(125);
+    ImGui::InputFloat("Audio duration (s)", &_renderAudioDuration, 1.0f, 10.0f, "%.2f");
+    _renderAudioDuration = std::max(0.1f, _renderAudioDuration);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(125);
+    ImGui::SliderFloat("Audio gain", &_renderAudioGain, 0.0f, 2.0f, "%.2f");
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##renderVideo", "Planned output video path, e.g. show.mp4", _renderVideoPath, sizeof(_renderVideoPath));
     ImGui::SetNextItemWidth(-1);
@@ -579,32 +615,47 @@ void PlaylistWindow::DrawRenderTimeline()
         if (clip.sprite) spriteTotal += std::max(0.1f, clip.duration);
         else presetTotal += std::max(0.1f, clip.duration);
     }
-    const double timelineTotal = std::max(presetTotal, spriteTotal);
+    const bool hasAudio = _renderAudioPath[0] != '\0';
+    const double audioTotal = hasAudio ? static_cast<double>(_renderAudioStart + _renderAudioDuration) : 0.0;
+    const double timelineTotal = std::max(std::max(presetTotal, spriteTotal), audioTotal);
     ImGui::Text("Presets: %.1fs   Sprites: %.1fs   Total: %.1fs",
                 presetTotal, spriteTotal, timelineTotal);
-    ImGui::BeginChild("RenderTimelineCanvas", ImVec2(0, 220), true, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("RenderTimelineCanvas", ImVec2(0, 270), true, ImGuiWindowFlags_HorizontalScrollbar);
     const float labelWidth = 92.0f;
     const float scale = _renderPixelsPerSecond;
     const float canvasWidth = std::max(ImGui::GetContentRegionAvail().x,
                                       labelWidth + static_cast<float>(timelineTotal) * scale + 80.0f);
-    ImGui::InvisibleButton("##timelineSurface", ImVec2(canvasWidth, 174.0f));
+    ImGui::InvisibleButton("##timelineSurface", ImVec2(canvasWidth, 226.0f));
     const ImVec2 base = ImGui::GetItemRectMin();
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const float trackX = base.x + labelWidth;
     const float rulerY = base.y + 14.0f;
     const float presetY = base.y + 46.0f;
     const float spriteY = base.y + 106.0f;
+    const float audioY = base.y + 166.0f;
     draw->AddText(ImVec2(base.x + 3, presetY + 12), IM_COL32(220, 220, 220, 255), "PRESETS");
     draw->AddText(ImVec2(base.x + 3, spriteY + 12), IM_COL32(220, 220, 220, 255), "SPRITES");
     draw->AddRectFilled(ImVec2(trackX, presetY), ImVec2(base.x + canvasWidth, presetY + 45),
                         IM_COL32(34, 46, 64, 255));
     draw->AddRectFilled(ImVec2(trackX, spriteY), ImVec2(base.x + canvasWidth, spriteY + 45),
                         IM_COL32(48, 37, 61, 255));
+    draw->AddText(ImVec2(base.x + 3, audioY + 12), IM_COL32(220, 220, 220, 255), "AUDIO");
+    draw->AddRectFilled(ImVec2(trackX, audioY), ImVec2(base.x + canvasWidth, audioY + 45), IM_COL32(34, 55, 47, 255));
+    if (hasAudio)
+    {
+        const float a = trackX + _renderAudioStart * scale;
+        const float b = a + _renderAudioDuration * scale;
+        draw->AddRectFilled(ImVec2(a + 1, audioY + 3), ImVec2(b - 1, audioY + 42), IM_COL32(42, 130, 105, 255), 4.0f);
+        draw->PushClipRect(ImVec2(a + 1, audioY + 3), ImVec2(b - 1, audioY + 42), true);
+        const std::string audioName = RenderBaseName(_renderAudioPath);
+        draw->AddText(ImVec2(a + 6, audioY + 13), IM_COL32(255, 255, 255, 255), audioName.c_str());
+        draw->PopClipRect();
+    }
     const int tickEvery = scale >= 35.0f ? 1 : (scale >= 12.0f ? 5 : 10);
     for (int sec = 0; sec <= static_cast<int>(timelineTotal + 10.0); sec += tickEvery)
     {
         const float x = trackX + sec * scale;
-        draw->AddLine(ImVec2(x, rulerY), ImVec2(x, spriteY + 45), IM_COL32(100, 100, 100, 85));
+        draw->AddLine(ImVec2(x, rulerY), ImVec2(x, audioY + 45), IM_COL32(100, 100, 100, 85));
         char tick[24];
         std::snprintf(tick, sizeof(tick), "%ds", sec);
         draw->AddText(ImVec2(x + 3, base.y), IM_COL32(190, 190, 190, 255), tick);
@@ -647,7 +698,7 @@ void PlaylistWindow::DrawRenderTimeline()
         _renderSelected = -1;
     }
     const float playheadX = trackX + static_cast<float>(_renderPlayhead) * scale;
-    draw->AddLine(ImVec2(playheadX, rulerY), ImVec2(playheadX, spriteY + 45.0f),
+    draw->AddLine(ImVec2(playheadX, rulerY), ImVec2(playheadX, audioY + 45.0f),
                   IM_COL32(255, 210, 100, 255), 2.0f);
     ImGui::EndChild();
 }
@@ -686,6 +737,10 @@ void PlaylistWindow::SaveRenderJob()
         << ( _renderCodec == 1 ? "hevc" : (_renderCodec == 2 ? "prores_422" : "h264"))
         << "\", \"bitrateMbps\": " << _renderBitrateMbps << "},\n";
     out << "  \"audioSource\": \"" << EscapeRenderJson(_renderAudioPath) << "\",\n";
+    out << "  \"audioTrack\": {\"path\": \"" << EscapeRenderJson(_renderAudioPath)
+        << "\", \"startSeconds\": " << _renderAudioStart
+        << ", \"durationSeconds\": " << _renderAudioDuration
+        << ", \"gain\": " << _renderAudioGain << "},\n";
     out << "  \"tracks\": {\n    \"presets\": [\n";
     bool first = true;
     double offset = 0.0;

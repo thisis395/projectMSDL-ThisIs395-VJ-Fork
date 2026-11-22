@@ -26,6 +26,7 @@ private:
     void DrawSequenceTab();
     void DrawSequenceClips(bool sprites);
     void UpdateSequence();
+    bool CueSequencePreset(std::size_t index);
 
     struct SequenceClip
     {
@@ -50,6 +51,7 @@ private:
     std::size_t _sequencePosition{0};
     uint64_t _sequenceStarted{0};
     bool _sequencePlaying{false};
+    bool _sequenceLocked{false};
     int _renderSelected{-1};
     double _renderPlayhead{0.0};
     float _renderPixelsPerSecond{14.0f};
@@ -61,5 +63,8 @@ private:
     char _renderJobPath[2048]{};
     char _renderVideoPath[2048]{};
     char _renderAudioPath[2048]{};
+    float _renderAudioStart{0.0f};
+    float _renderAudioDuration{180.0f};
+    float _renderAudioGain{1.0f};
     char _renderStatus[256]{};
 };
