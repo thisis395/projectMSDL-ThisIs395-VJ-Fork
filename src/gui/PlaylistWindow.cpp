@@ -633,6 +633,7 @@ std::string EscapeRenderJson(const std::string& input)
 
 void PlaylistWindow::DrawRenderTab()
 {
+    PollRenderStatus();
     ImGui::TextUnformatted("Render workspace");
     ImGui::SameLine();
     ImGui::TextDisabled("Experimental FFmpeg export: local renderer + encoder required.");
@@ -760,6 +761,17 @@ void PlaylistWindow::DrawRenderTab()
     ImGui::SameLine();
     if (ImGui::Button("Render video with FFmpeg"))
         LaunchOfflineRender();
+    if (_renderRunning)
+    {
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel render"))
+        {
+            const std::string cancelPath = std::string(_renderJobPath) + ".cancel";
+            std::ofstream out(cancelPath, std::ios::binary);
+            if (out) std::snprintf(_renderStatus, sizeof(_renderStatus), "Cancellation requested.");
+        }
+        ImGui::ProgressBar(_renderProgress, ImVec2(-1.0f, 0.0f));
+    }
     ImGui::TextDisabled("Setup may install Python and FFmpeg via your OS package manager.");
     ImGui::TextDisabled("Render runs as a separate process; see its console for progress/errors.");
     if (_renderStatus[0])
@@ -862,7 +874,7 @@ void PlaylistWindow::DrawRenderTimeline()
     ImGui::EndChild();
 }
 
-void PlaylistWindow::SaveRenderJob()
+void PlaylistWindow::SaveRenderJob(bool replaceExisting)
 {
     const std::string path(_renderJobPath);
     if (path.size() < 5 || path.substr(path.size() - 5) != ".json")
@@ -876,7 +888,7 @@ void PlaylistWindow::SaveRenderJob()
         return;
     }
     std::ifstream existing(path, std::ios::binary);
-    if (existing.good())
+    if (existing.good() && !replaceExisting)
     {
         std::snprintf(_renderStatus, sizeof(_renderStatus), "Job file exists; choose a different filename.");
         return;
@@ -976,7 +988,7 @@ void PlaylistWindow::LaunchOfflineRender()
         return;
     }
     // Regenerate the manifest from the current timeline before launching the encoder.
-    SaveRenderJob();
+    SaveRenderJob(true);
     if (std::strstr(_renderStatus, "Render job saved") == nullptr)
         return;
 
@@ -1004,14 +1016,59 @@ void PlaylistWindow::LaunchOfflineRender()
     }
     try
     {
+        _renderRunning = true;
+        _renderProgress = 0.0f;
         Poco::Process::launch(program, {driver.toString(), _renderJobPath, "--backend",
-                                       backend.toString(), "--ffmpeg", "ffmpeg"});
+                                       backend.toString(), "--ffmpeg", "ffmpeg",
+                                       "--status", std::string(_renderJobPath) + ".status.json",
+                                       "--cancel", std::string(_renderJobPath) + ".cancel"});
         std::snprintf(_renderStatus, sizeof(_renderStatus),
                       "Encoder process launched; this does not confirm video export succeeded.");
     }
     catch (const Poco::Exception&)
     {
+        _renderRunning = false;
         std::snprintf(_renderStatus, sizeof(_renderStatus),
                       "Could not launch Python. Run prerequisite setup, then restart the app.");
     }
+}
+
+void PlaylistWindow::PollRenderStatus()
+{
+    if (!_renderRunning || _renderJobPath[0] == '\0')
+        return;
+    const uint64_t now = SDL_GetTicks64();
+    if (now - _renderLastPoll < 500)
+        return;
+    _renderLastPoll = now;
+    const std::string filename = std::string(_renderJobPath) + ".status.json";
+    std::ifstream in(filename, std::ios::binary);
+    if (!in) return;
+    std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (data.find("\"state\": \"completed\"") != std::string::npos)
+    {
+        _renderRunning = false;
+        _renderProgress = 1.0f;
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Video export completed successfully.");
+    }
+    else if (data.find("\"state\": \"failed\"") != std::string::npos)
+    {
+        _renderRunning = false;
+        std::snprintf(_renderStatus, sizeof(_renderStatus),
+                      "Rendering failed. See the status JSON next to the job file.");
+    }
+    else if (data.find("\"state\": \"cancelled\"") != std::string::npos)
+    {
+        _renderRunning = false;
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Render cancelled.");
+    }
+    else if (data.find("\"state\": \"rendering\"") != std::string::npos)
+    {
+        const auto key = data.find("\"progress\": ");
+        if (key != std::string::npos)
+            _renderProgress = std::max(0.0f, std::min(1.0f,
+                static_cast<float>(std::strtod(data.c_str() + key + 12, nullptr))));
+    }
+    else if (data.find("\"state\": \"preparing_audio\"") != std::string::npos)
+        std::snprintf(_renderStatus, sizeof(_renderStatus), "Preparing audio FFT source...");
 }

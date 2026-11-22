@@ -24,7 +24,8 @@ private:
     void DrawExportTab();
     void DrawRenderTab();
     void DrawRenderTimeline();
-    void SaveRenderJob();
+    void SaveRenderJob(bool replaceExisting = false);
+    void PollRenderStatus();
     void SetupRenderPrerequisites();
     void LaunchOfflineRender();
     void DrawSequenceTab();
@@ -76,4 +77,7 @@ private:
     float _renderAudioDuration{180.0f};
     float _renderAudioGain{1.0f};
     char _renderStatus[256]{};
+    float _renderProgress{0.0f};
+    bool _renderRunning{false};
+    uint64_t _renderLastPoll{0};
 };
