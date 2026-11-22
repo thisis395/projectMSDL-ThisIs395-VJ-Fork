@@ -1,0 +1,28 @@
+name: Qt6 Native UI Check
+
+on:
+  push:
+    branches:
+      - feature/qt6-native-control-center
+  pull_request:
+    paths:
+      - 'src/native/**'
+      - '.github/workflows/native-ui-check.yml'
+      - 'CMakeLists.txt'
+
+jobs:
+  qt6-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt6 Widgets
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev pkg-config
+      - name: Compile native control center
+        run: |
+          c++ -std=c++17 -fPIC -Wall -Wextra -Werror \
+            src/native/NativeControlCenter.cpp \
+            -o native-control-center $(pkg-config --cflags --libs Qt6Widgets)
+      - name: Verify binary
+        run: test -s native-control-center
