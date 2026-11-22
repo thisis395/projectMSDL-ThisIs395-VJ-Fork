@@ -144,3 +144,9 @@ message(STATUS "The projectMSDL binary will look for the following hard-coded pa
 message(STATUS "    Configuration file:  ${DEFAULT_CONFIG_PATH}")
 message(STATUS "    Presets:             ${DEFAULT_PRESETS_PATH}")
 message(STATUS "    Textures:            ${DEFAULT_TEXTURES_PATH}")
+
+# Qt is opt-in until the native controls replace the legacy ImGui editors.
+option(ENABLE_QT_NATIVE_UI "Build the separate Qt6 native control center" OFF)
+if(ENABLE_QT_NATIVE_UI)
+    add_subdirectory(src/native)
+endif()
