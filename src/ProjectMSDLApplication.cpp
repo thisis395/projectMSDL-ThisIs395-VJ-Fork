@@ -119,6 +119,10 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
     using Poco::Util::Option;
     using Poco::Util::OptionCallback;
 
+    options.addOption(Option("controlDir", "", "Private local command mailbox directory, supplied by the Qt control center.",
+                             false, "<path>", true)
+                          .binding("native.controlDir", _commandLineOverrides));
+
     options.addOption(Option("help", "h", "Display this help text and exit.")
                           .callback(
                               OptionCallback<ProjectMSDLApplication>(this, &ProjectMSDLApplication::DisplayHelp)));
