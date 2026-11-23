@@ -98,11 +98,14 @@ void MainMenu::Draw()
 
         if (ImGui::BeginMenu("Options"))
         {
-            if (ImGui::MenuItem("Sprite Manager..."))
+            // The native Control Center owns the Sprite Manager UI when
+            // connected. Do not show a second inert manager inside SDL.
+            if (ProjectMSDLApplication::instance().config().getString("native.controlDir", "").empty())
             {
-                _gui.ShowSpriteManagerWindow();
+                if (ImGui::MenuItem("Sprite Manager..."))
+                    _gui.ShowSpriteManagerWindow();
+                ImGui::Separator();
             }
-            ImGui::Separator();
 
             auto& app = ProjectMSDLApplication::instance();
 
