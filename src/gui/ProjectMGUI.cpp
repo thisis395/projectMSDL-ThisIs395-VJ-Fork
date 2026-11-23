@@ -162,7 +162,11 @@ void ProjectMGUI::Draw()
     {
         _mainMenu.Draw();
         _settingsWindow.Draw();
-        _spriteManagerWindow.Draw();
+        // In integrated Qt mode the native Control Center owns the sprite UI.
+        // Keep the backing SpriteManagerWindow alive for IPC; only hide its
+        // duplicate ImGui panel inside the SDL/OpenGL visualizer.
+        if (Poco::Util::Application::instance().config().getString("native.controlDir", "").empty())
+            _spriteManagerWindow.Draw();
         _playlistWindow.Draw();
         _aboutWindow.Draw();
         _helpWindow.Draw();
@@ -206,7 +210,8 @@ void ProjectMGUI::ShowSettingsWindow()
 
 void ProjectMGUI::ShowSpriteManagerWindow()
 {
-    _spriteManagerWindow.Show();
+    if (Poco::Util::Application::instance().config().getString("native.controlDir", "").empty())
+        _spriteManagerWindow.Show();
 }
 
 void ProjectMGUI::ShowPlaylistWindow()
