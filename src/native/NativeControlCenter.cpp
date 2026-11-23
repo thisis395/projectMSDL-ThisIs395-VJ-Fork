@@ -3,6 +3,8 @@
 
 #include <QApplication>
 #include <QIcon>
+#include <QColor>
+#include <QPalette>
 #include <QPixmap>
 #include <QByteArray>
 #include <cstring>
@@ -94,7 +96,12 @@ public:
             });
             return row;
         };
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+        // This executable contains the SDL renderer. Never ask for a second app.
+        form->addRow(tr("Application"), executable_);
+#else
         form->addRow(tr("Executable"), browseRow(executable_, false));
+#endif
         form->addRow(tr("Preset folder"), browseRow(presetPath_, true));
         form->addRow(tr("Texture folder"), browseRow(texturePath_, true));
         form->addRow(tr("Width"), width_);
@@ -256,7 +263,11 @@ private:
     {
         if (process_.state() != QProcess::NotRunning)
             return;
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+        const QString executable = QCoreApplication::applicationFilePath();
+#else
         const QString executable = executable_->text().trimmed();
+#endif
         if (!QFileInfo(executable).isFile()) {
             QMessageBox::warning(this, tr("Executable not found"),
                 tr("Select the compiled projectMSDL (or projectM on macOS) executable first."));
@@ -505,6 +516,28 @@ int main(int argc, char** argv)
     }
 #endif
     QApplication app(argc, argv);
+    app.setWindowIcon(QIcon(QStringLiteral(":/thisis395/portrait.png")));
+
+    // Keep the supplied portrait monochrome, but use the user's green theme.
+    QPalette palette = app.palette();
+    palette.setColor(QPalette::Window, QColor("#101510"));
+    palette.setColor(QPalette::WindowText, QColor("#EAF2E9"));
+    palette.setColor(QPalette::Base, QColor("#0B100C"));
+    palette.setColor(QPalette::AlternateBase, QColor("#162016"));
+    palette.setColor(QPalette::Text, QColor("#EAF2E9"));
+    palette.setColor(QPalette::Button, QColor("#1C281E"));
+    palette.setColor(QPalette::ButtonText, QColor("#F0F4F0"));
+    palette.setColor(QPalette::Highlight, QColor("#3CDD28"));
+    palette.setColor(QPalette::HighlightedText, QColor("#071506"));
+    palette.setColor(QPalette::Link, QColor("#51EF43"));
+    palette.setColor(QPalette::PlaceholderText, QColor("#93A398"));
+    app.setPalette(palette);
+    app.setStyleSheet(QStringLiteral(
+        "QTabBar::tab:selected { border-bottom: 2px solid #3CDD28; }"
+        "QPushButton:hover { border-color: #3CDD28; }"
+        "QDockWidget::title { background: #162016; }"
+        "QScrollBar::handle { background: #314C32; }"));
+
     QCoreApplication::setOrganizationName(QStringLiteral("ThisIs395"));
     QCoreApplication::setApplicationName(QStringLiteral("VJ Control Center"));
     NativeControlCenter window;
