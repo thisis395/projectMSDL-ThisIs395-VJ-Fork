@@ -35,6 +35,7 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QTextDocument>
 #include <QProcess>
 #include <QPushButton>
 #include <QSettings>
