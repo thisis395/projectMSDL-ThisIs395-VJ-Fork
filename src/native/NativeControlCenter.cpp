@@ -316,6 +316,17 @@ public:
                     fail("Imported sprite did not enable Apply/Remove");
                     return;
                 }
+                if (lastRendererSpriteCount_ < 1) {
+                    fail("Qt lists PNG but projectM has no active rendered sprite");
+                    return;
+                }
+                auto* library = spriteManager_->findChild<QListWidget*>(
+                    QStringLiteral("sprite-import-library"));
+                if (!library || library->count() != 1 ||
+                    !library->item(0)->text().startsWith(QStringLiteral("Live:"))) {
+                    fail("Actual PNG picker did not populate the live imported file library");
+                    return;
+                }
                 scale->setValue(0.73);
                 apply->click();
                 phase = 1;
@@ -603,6 +614,7 @@ private:
         const bool ok = response.value(QStringLiteral("ok")).toBool();
         lastReplyAction_ = action;
         lastReplyOk_ = ok;
+        lastRendererSpriteCount_ = response.value(QStringLiteral("activeSpriteCount")).toInt(-1);
         if (ok && action == QStringLiteral("ping")) {
             handshakeRetries_ = 0;
             rendererReady_ = true;
@@ -679,6 +691,7 @@ private:
     bool rendererReady_ = false;
     QString lastReplyAction_;
     bool lastReplyOk_ = true;
+    int lastRendererSpriteCount_ = -1;
     int handshakeRetries_ = 0;
     QLineEdit* executable_ = nullptr;
     QLineEdit* presetPath_ = nullptr;
