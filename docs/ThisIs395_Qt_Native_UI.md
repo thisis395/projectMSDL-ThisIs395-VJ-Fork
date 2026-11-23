@@ -116,3 +116,47 @@ cmake --install build --config Release --prefix /some/install/path
 ```
 
 **CI status:** The unified packaging workflow must pass before these artifact names are considered downloadable. Previously built native-only UI artifacts do not retroactively become integrated packages. The Qt-to-renderer mailbox and separate-window arrangement still need physical smoke testing.
+
+
+## Native Sprite Manager: dockable and pop-out controls
+
+The Qt6 Control Center now contains a **Sprite Manager** dock, with a
+**Pop out Sprite Manager** button on its Visualizer tab. The separate Options
+window can open the same editor. These are live renderer controls, not
+placeholders.
+
+The panel supports PNG import, selected-sprite removal, refresh from the
+running renderer, a PNG preview, and the existing supported properties:
+X/Y position (0–1), scale (0.02–2), opacity (0–1), rotation (±180 degrees),
+audio reaction gain (0–3), and Off/Bass/Mids/Treble band selection.
+Slider release, finished spinbox edits, audio-band changes and explicit
+**Apply to live visualizer** send live updates.
+
+The local versioned mailbox extends v1 with \`sprite.list\`, \`sprite.add\`,
+\`sprite.update\`, and \`sprite.remove\`; replies include live state snapshots.
+The Qt client queues concurrent commands (coalescing repeated updates to the
+same sprite) instead of discarding slider edits. Changes run inside the
+**same \`SpriteManagerWindow\` instance** as the existing ImGui UI, serviced
+on the SDL render thread, so both interfaces operate on the same live
+sprite list. The existing libprojectM audio-band expression determines
+reactivity, preserving the application's internal FFT behavior.
+
+State is intentionally **session-local**: PNGs are loaded from their original
+file paths and must remain accessible on the renderer's machine. Do not
+claim automatic persistence or sequence timeline synchronization at this
+stage. The live UI should disable sprite editing until the renderer's
+initial \`ping\` handshake succeeds.
+
+### Native sprite QA
+- Open the dock and detach it into its own window.
+- Launch the renderer, import a transparent PNG, verify it appears.
+- Adjust position, scale, opacity, rotation, gain and band; verify each
+  command is acknowledged and visible in the OpenGL output.
+- Open the old ImGui sprite manager and verify both UI surfaces manage the
+  same objects without duplicate state.
+- Test rapid slider changes and 16-sprite limit.
+- Remove a sprite and verify the list and live output update.
+- Shut down/restart the renderer; confirm controls disable and recover after
+  a new handshake.
+- Test the **unified** Windows/macOS/Linux artifacts, not only the
+  standalone Qt-only binary.
