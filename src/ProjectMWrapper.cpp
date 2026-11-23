@@ -216,6 +216,11 @@ bool ProjectMWrapper::PrepareSpriteTexture(const std::string& path, std::string&
     return true;
 #else
     // The original SDL-only executable keeps the existing disk-loading path.
+    const Poco::File file(path);
+    if (!file.exists() || !file.isFile() || !file.canRead()) {
+        error = "PNG file is missing or unreadable";
+        return false;
+    }
     Poco::Path filePath(path);
     textureName = filePath.getBaseName();
     AddSpriteTextureDirectory(filePath.parent().toString());
