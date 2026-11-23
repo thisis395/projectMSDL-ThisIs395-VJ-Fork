@@ -258,7 +258,26 @@ public:
         QElapsedTimer started;
         started.start();
         auto* timer = new QTimer(this);
-        spriteManager_->importSpriteFile(pngPath); // exercises auto-start and queue
+        // Exercise the real Add PNG button and QFileDialog::fileSelected
+        // signal, not just the importSpriteFile helper used by earlier tests.
+        auto* add = spriteManager_->findChild<QPushButton*>(QStringLiteral("sprite-add"));
+        if (!add || !add->isEnabled()) {
+            std::cerr << "FAIL: Add PNG button missing/disabled" << std::endl;
+            QCoreApplication::exit(1);
+            return;
+        }
+        add->click();
+        QTimer::singleShot(0, this, [this, pngPath] {
+            auto* dialog = spriteManager_->findChild<QFileDialog*>(
+                QStringLiteral("sprite-file-picker"));
+            if (!dialog) {
+                std::cerr << "FAIL: Add PNG did not open file picker" << std::endl;
+                QCoreApplication::exit(1);
+                return;
+            }
+            dialog->selectFile(pngPath);
+            dialog->accept();
+        });
         connect(timer, &QTimer::timeout, this, [this, timer, started, phase = 0]() mutable {
             const auto fail = [this](const char* why) {
                 std::cerr << "FAIL: Qt-to-renderer Sprite Manager smoke: " << why
@@ -323,8 +342,8 @@ public:
                        pendingId_.isEmpty() && spriteManager_->currentState().isEmpty() &&
                        list->count() == 0) {
                 timer->stop();
-                std::cout << "PASS: Qt Control Center auto-launch, live PNG list, "
-                             "button scaling, Refresh, Remove and renderer IPC" << std::endl;
+                std::cout << "PASS: actual Add PNG file picker, decoded PNG texture, "
+                             "Qt live list, Apply/Refresh/Remove and renderer IPC" << std::endl;
                 QCoreApplication::exit(0);
             }
         });
