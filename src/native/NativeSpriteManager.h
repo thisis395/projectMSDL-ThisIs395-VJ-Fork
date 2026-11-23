@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <initializer_list>
 #include <utility>
 
 // Dedicated Qt6 widget using the *same* renderer-owned SpriteManagerWindow
@@ -115,7 +116,9 @@ public:
 
     void setConnected(bool value) {
         connected_ = value;
-        add_->setEnabled(value);
+        // Importing a PNG is permitted before the renderer starts. The
+        // parent will launch the visualizer and queue the pending import.
+        add_->setEnabled(true);
         refresh_->setEnabled(value);
         updateSelectionEnabled();
         if (!value) setStatus(tr("No live renderer connection. Launch the visualizer first."));
@@ -199,10 +202,16 @@ private:
     }
 
     void dispatch(const QString& action, const QJsonObject& params) {
-        if (!connected_ || !dispatch_) {
-            setStatus(tr("Start the visualizer first."));
+        if (!dispatch_) {
+            setStatus(tr("No renderer controller attached."));
             return;
         }
+        if (!connected_ && action != QStringLiteral("sprite.add")) {
+            setStatus(tr("Start the visualizer before editing live sprites."));
+            return;
+        }
+        if (!connected_)
+            setStatus(tr("Starting visualizer and queuing PNG import..."));
         dispatch_(action, params);
     }
 
