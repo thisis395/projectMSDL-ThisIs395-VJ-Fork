@@ -122,6 +122,16 @@ jobs:
             python3 frontend-sdl2/tools/test_native_sprite_ipc.py \
               --exe cmake-build-frontend-sdl2/src/native/ThisIs395-VJ
 
+      - name: End-to-end native Qt Sprite Manager GUI and renderer integration
+        run: |
+          # Drive the real Qt Control Center, which starts its own renderer.
+          # Unlike the direct mailbox test, this verifies Qt list population,
+          # the Apply/Refresh/Remove buttons and native IPC together.
+          LIBGL_ALWAYS_SOFTWARE=1 SDL_AUDIODRIVER=dummy timeout 90s \
+            xvfb-run -a -s "-screen 0 1280x720x24" \
+            cmake-build-frontend-sdl2/src/native/ThisIs395-VJ \
+              --vj-control-smoke "$GITHUB_WORKSPACE/frontend-sdl2/branding/portrait-original.png"
+
       - name: Offline render driver syntax + FFmpeg smoke test
         run: |
           sudo apt-get install -y ffmpeg
