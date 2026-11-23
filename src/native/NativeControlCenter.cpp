@@ -302,6 +302,7 @@ private:
         spriteManager_->setConnected(false);
         spriteManager_->setState(QJsonArray());
         queuedCommands_.clear();
+        handshakeRetries_ = 0;
         process_.start();
         mailboxPoll_.start();
         sendHandshakeOnStart_ = true;
@@ -401,13 +402,25 @@ private:
             if (!pendingId_.isEmpty() && pendingElapsed_.isValid() &&
                 pendingElapsed_.elapsed() > 5000) {
                 const bool wasSpriteCommand = pendingAction_.startsWith(QStringLiteral("sprite."));
+                const bool wasHandshake = pendingAction_ == QStringLiteral("ping");
                 pendingId_.clear();
                 pendingAction_.clear();
                 queuedCommands_.clear();
                 QFile::remove(mailboxDir_.filePath(QStringLiteral("command.json")));
                 status_->setText(tr("Renderer did not respond within 5 seconds."));
                 if (wasSpriteCommand)
-                    spriteManager_->setStatus(tr("Live renderer timed out; refresh to resync."));
+                    spriteManager_->setStatus(tr("Sprite command timed out. Check the visualizer log."));
+                if (wasHandshake && handshakeRetries_++ < 3) {
+                    spriteManager_->setStatus(tr("Waiting for renderer startup (retry %1/3)...").arg(handshakeRetries_));
+                    // Delaying the next ping avoids hammering a renderer that
+                    // is still loading presets and building its OpenGL context.
+                    QTimer::singleShot(750, this, [this] {
+                        if (process_.state() == QProcess::Running && pendingId_.isEmpty())
+                            sendCommand(QStringLiteral("ping"));
+                    });
+                } else if (wasHandshake) {
+                    spriteManager_->setStatus(tr("Renderer did not complete the handshake. Open Visualizer output for details."));
+                }
             }
             return;
         }
@@ -423,8 +436,10 @@ private:
         pendingId_.clear();
         pendingAction_.clear();
         const bool ok = response.value(QStringLiteral("ok")).toBool();
-        if (ok && action == QStringLiteral("ping"))
+        if (ok && action == QStringLiteral("ping")) {
+            handshakeRetries_ = 0;
             spriteManager_->setConnected(true);
+        }
         if (ok && response.value(QStringLiteral("sprites")).isArray()) {
             // Defer a state refresh until all pending slider edits have landed.
             if (queuedCommands_.isEmpty() || action != QStringLiteral("sprite.update"))
@@ -488,6 +503,7 @@ private:
     QQueue<Command> queuedCommands_;
     QElapsedTimer pendingElapsed_;
     bool sendHandshakeOnStart_ = false;
+    int handshakeRetries_ = 0;
     QLineEdit* executable_ = nullptr;
     QLineEdit* presetPath_ = nullptr;
     QLineEdit* texturePath_ = nullptr;
