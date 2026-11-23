@@ -7,9 +7,13 @@ if(APPLE)
   add_executable(ThisIs395-VJ-ControlCenter MACOSX_BUNDLE
     ../NativeControlCenter.cpp
     ../NativeShowEditor.h
-    ../NativeSpriteManager.h)
+    ../NativeSpriteManager.h
+    ../../resources/icons/icon.icns)
+  set_source_files_properties(../../resources/icons/icon.icns PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources")
   set_target_properties(ThisIs395-VJ-ControlCenter PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "ThisIs395 VJ Control Center"
+    MACOSX_BUNDLE_ICON_FILE "icon.icns"
     MACOSX_BUNDLE_GUI_IDENTIFIER "net.thisis395.vj.controlcenter"
     MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0")
@@ -17,7 +21,8 @@ elseif(WIN32)
   add_executable(ThisIs395-VJ-ControlCenter WIN32
     ../NativeControlCenter.cpp
     ../NativeShowEditor.h
-    ../NativeSpriteManager.h)
+    ../NativeSpriteManager.h
+    ../../projectMSDL.rc)
 else()
   add_executable(ThisIs395-VJ-ControlCenter
     ../NativeControlCenter.cpp
