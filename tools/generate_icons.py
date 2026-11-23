@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "branding" / "projectm-icon.png"
+SOURCE = ROOT / "branding" / "portrait-original.png"
 OUTPUT = ROOT / "src" / "resources" / "icons"
 SIZES = (16, 32, 48, 64, 72, 96, 128, 256)
 
@@ -22,7 +22,7 @@ def main() -> None:
     with Image.open(SOURCE) as source:
         master = source.convert("RGBA")
     if master.size != (256, 256):
-        raise SystemExit(f"Expected a 256x256 icon, received {master.size}")
+        master = master.resize((256, 256), Image.Resampling.LANCZOS)
 
     for size in SIZES:
         master.resize((size, size), Image.Resampling.LANCZOS).save(
