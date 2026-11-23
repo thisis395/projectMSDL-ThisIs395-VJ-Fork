@@ -10,6 +10,13 @@ else()
 endif()
 
 target_link_libraries(ThisIs395-VJ-ControlCenter PRIVATE Qt6::Widgets)
+# Identical user-supplied portrait on both the Qt window and SDL pop-out.
+set(VJ_PORTRAIT_ICON "${CMAKE_SOURCE_DIR}/branding/portrait-original.png")
+set_source_files_properties("${VJ_PORTRAIT_ICON}" PROPERTIES
+    QT_RESOURCE_ALIAS "portrait.png")
+qt_add_resources(ThisIs395-VJ-ControlCenter "thisis395_portrait"
+    PREFIX "/thisis395" FILES "${VJ_PORTRAIT_ICON}")
+
 set_target_properties(ThisIs395-VJ-ControlCenter PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
@@ -96,6 +103,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ENABLE_FLAT_PACKAGE)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/ThisIs395-VJ-ControlCenter.desktop"
         DESTINATION "${PROJECTMSDL_DESKTOP_DIR}" COMPONENT projectMSDL)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/ThisIs395-VJ-ControlCenter.svg"
-        DESTINATION "${PROJECTMSDL_ICONS_DIR}/scalable/apps" COMPONENT projectMSDL)
+    install(FILES "${CMAKE_SOURCE_DIR}/src/resources/icons/icon_scalable.svg"
+        DESTINATION "${PROJECTMSDL_ICONS_DIR}/scalable/apps"
+        RENAME "ThisIs395-VJ-ControlCenter.svg" COMPONENT projectMSDL)
 endif()
