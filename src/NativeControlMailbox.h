@@ -19,6 +19,7 @@
 
 #include "notifications/PlaybackControlNotification.h"
 #include "gui/SpriteManagerWindow.h"
+#include "SDLRenderingWindow.h"
 
 // Local-only, single-inflight v1 command mailbox. Called exclusively on the SDL
 // render thread, so libprojectM calls never race against rendering.
@@ -68,6 +69,17 @@ public:
                 post(PlaybackControlNotification::Action::ToggleShuffle);
             } else if (action == "lock") {
                 post(PlaybackControlNotification::Action::TogglePresetLocked);
+            } else if (action == "window.focus") {
+                SDL_Window* window = Poco::Util::Application::instance()
+                    .getSubsystem<SDLRenderingWindow>().GetRenderingWindow();
+                if (!window) throw Poco::InvalidArgumentException("Visualizer window is unavailable");
+                SDL_ShowWindow(window);
+                SDL_RaiseWindow(window);
+            } else if (action == "window.hide") {
+                SDL_Window* window = Poco::Util::Application::instance()
+                    .getSubsystem<SDLRenderingWindow>().GetRenderingWindow();
+                if (!window) throw Poco::InvalidArgumentException("Visualizer window is unavailable");
+                SDL_HideWindow(window);
             } else if (action == "sprite.list") {
                 // Return all renderer-owned sprites below.
             } else if (action == "sprite.add") {
