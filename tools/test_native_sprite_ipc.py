@@ -86,6 +86,9 @@ def main():
                 assert isinstance(result.get("sprites"), list), result
                 result = command(mailbox, process, "sprite.add", path=str(image))
                 assert len(result["sprites"]) == 1, result
+                # Guard against libprojectM accepting a sprite definition
+                # while its image resolves to an invisible fallback texture.
+                assert result.get("activeSpriteCount", 0) >= 1, result
                 result = command(
                     mailbox, process, "sprite.update",
                     index=0, x=0.3, y=0.7, scale=0.6, opacity=0.8,
