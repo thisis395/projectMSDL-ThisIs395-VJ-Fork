@@ -219,3 +219,28 @@ native DEB with one desktop launcher.
 The new option has not yet passed all platform builds or physical GPU
 runtime verification. Keep the PR in draft until verified; do not reuse old
 two-binary suite artifacts as evidence of a successful one-binary build.
+
+
+## Sprite Manager reliability fixes (pending CI runtime verification)
+
+The native manager now accepts **Add PNG** before the renderer is launched;
+the control center automatically starts its own detached visualizer and queues
+the import until the control-channel handshake is available. Live transform
+fields remain disabled until a sprite has been selected and the renderer has
+confirmed connectivity.
+
+The control center retries a startup \`ping\` up to three times when a slow
+renderer hasn't yet initialized. The Qt panel preserves numeric fields with
+keyboard focus rather than overwriting in-progress edits on every incoming
+snapshot. The renderer also logs command mailbox read/write problems to
+stderr, which appears in the Visualizer output pane.
+
+\`tools/test_native_sprite_ipc.py\` is a headless integration test using a real
+SDL/OpenGL renderer under Xvfb. It sends \`ping\`, \`sprite.add\`,
+\`sprite.update\`, \`sprite.list\` and \`sprite.remove\`, verifying real
+live state responses and rendering startup. The unified Linux GitHub workflow
+now runs it after compilation. If this test fails it should block merging until
+the underlying runtime issue is resolved.
+
+**Do not equate compilation with verified runtime operation.** Windows GPU
+and macOS device tests are still outstanding.
