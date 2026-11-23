@@ -244,3 +244,33 @@ the underlying runtime issue is resolved.
 
 **Do not equate compilation with verified runtime operation.** Windows GPU
 and macOS device tests are still outstanding.
+
+
+## Sprite Manager regression: duplicate window and inert buttons
+
+The native **Sprite Manager is now a dedicated tab inside the Control Center**.
+The former Qt floating dock popup was removed. The Sprite Manager navigation
+button and Options-panel link both select the embedded tab, while the
+visualizer remains the intended pop-out rendering window.
+
+In integrated Qt-controlled mode, the old ImGui Sprite Manager view and menu
+item are suppressed. Its SpriteManagerWindow backend remains loaded because
+Qt sprite commands still operate on that shared sprite list on the renderer
+thread.
+
+Add PNG and Refresh can now start the renderer on demand. Non-ping controls
+are queued until ping acknowledgment to avoid preempting the initial
+handshake and leaving every editing control disabled. Pending imports survive
+startup handshake retries. Remove, Apply and transform controls intentionally
+remain disabled until a renderer connection exists and a sprite is selected.
+
+Regression tests:
+- NativeSpriteManagerButtons (Qt Widgets, standalone native CI): checks
+  Refresh, Apply, Remove, selection, scale payloads, and availability of
+  Add and Refresh before launch using actual button clicks.
+- tools/test_native_sprite_ipc.py (unified Linux CI): checks live PNG
+  import, sprite update, list and removal using real projectM/SDL/OpenGL
+  under Xvfb.
+
+Do not mark the defect closed until both tests and unified packaging pass.
+Physical Windows GPU testing is still required.
