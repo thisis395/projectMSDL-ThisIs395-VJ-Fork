@@ -1,4 +1,5 @@
 # Note: each DESTINATION keyword needs its own COMPONENT specification!
+if(NOT ENABLE_VJ_SINGLE_BINARY)
 install(TARGETS projectMSDL
         RUNTIME_DEPENDENCY_SET projectMSDLDepends
         RUNTIME DESTINATION ${PROJECTMSDL_BIN_DIR}
@@ -6,6 +7,7 @@ install(TARGETS projectMSDL
         BUNDLE DESTINATION . # .app bundle will reside at the top-level of the install prefix
         COMPONENT projectMSDL
         )
+endif()
 
 install(FILES ${PROJECTM_CONFIGURATION_FILE}
         DESTINATION ${PROJECTMSDL_DATA_DIR}
@@ -70,7 +72,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT ENABLE_FLAT_PACKAGE)
             DESTINATION ${PROJECTMSDL_DATA_DIR}
             COMPONENT projectMSDL
             )
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND NOT ENABLE_VJ_SINGLE_BINARY)
         install(IMPORTED_RUNTIME_ARTIFACTS projectMSDL
                 LIBRARY DESTINATION ${PROJECTMSDL_BIN_DIR}
                 RUNTIME DESTINATION ${PROJECTMSDL_BIN_DIR}
