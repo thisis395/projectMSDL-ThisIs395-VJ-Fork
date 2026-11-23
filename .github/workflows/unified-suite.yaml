@@ -209,14 +209,20 @@ jobs:
           & (Get-Command windeployqt.exe -ErrorAction Stop).Source --release --no-translations --no-compiler-runtime "$suite/ThisIs395-VJ-ControlCenter.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path "$suite/platforms/qwindows.dll")) { throw 'Qt platform plugin missing' }
-          "Start ThisIs395-VJ-ControlCenter.exe to launch the native UI; the projectMSDL renderer is included beside it." | Set-Content "$suite/README.txt"
-          Compress-Archive -Path "$suite/*" -DestinationPath "$env:GITHUB_WORKSPACE/ThisIs395-VJ-suite-windows-x64.zip" -Force
+          "Start ThisIs395-VJ-ControlCenter.exe to launch the native UI; projectMSDL.exe is installed alongside it." | Set-Content "$suite/README.txt"
+          # Verify the final directory itself, not just the compiler output.
+          foreach ($required in @("projectMSDL.exe", "ThisIs395-VJ-ControlCenter.exe", "projectMSDL-offline.exe", "platforms/qwindows.dll")) {
+            $full = Join-Path $suite $required
+            if (!(Test-Path -LiteralPath $full -PathType Leaf)) { throw "Unified suite missing: $required" }
+          }
+          Get-ChildItem -LiteralPath $suite | Select-Object Name, Length | Format-Table -AutoSize
 
-      - name: Upload unified Windows suite
+      - name: Upload unified Windows suite (single ZIP download)
         uses: actions/upload-artifact@v6
         with:
           name: ThisIs395-VJ-suite-windows-x64
-          path: ThisIs395-VJ-suite-windows-x64.zip
+          # GitHub Actions already ZIPs the directory. Avoid nested ZIP archives.
+          path: ThisIs395-VJ-suite/
           if-no-files-found: error
 
   build-darwin:
