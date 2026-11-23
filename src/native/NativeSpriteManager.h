@@ -46,13 +46,16 @@ public:
         auto* actions = new QHBoxLayout;
         add_ = new QPushButton(tr("Add PNG..."));
         remove_ = new QPushButton(tr("Remove"));
+        remove_->setObjectName(QStringLiteral("sprite-remove"));
         refresh_ = new QPushButton(tr("Refresh"));
+        refresh_->setObjectName(QStringLiteral("sprite-refresh"));
         actions->addWidget(add_);
         actions->addWidget(remove_);
         actions->addWidget(refresh_);
         root->addLayout(actions);
 
         list_ = new QListWidget;
+        list_->setObjectName(QStringLiteral("sprite-live-list"));
         list_->setSelectionMode(QAbstractItemView::SingleSelection);
         root->addWidget(list_, 1);
 
@@ -66,6 +69,7 @@ public:
         x_ = addSlider(form, tr("X position"), 0, 1, 0.5, 0.01, 3);
         y_ = addSlider(form, tr("Y position"), 0, 1, 0.5, 0.01, 3);
         scale_ = addSlider(form, tr("Scale"), 0.02, 2, 0.25, 0.01, 3);
+        scale_->setObjectName(QStringLiteral("sprite-scale-input"));
         opacity_ = addSlider(form, tr("Opacity"), 0, 1, 1, 0.01, 3);
         rotation_ = addSlider(form, tr("Rotation (degrees)"), -180, 180, 0, 1, 1);
         gain_ = addSlider(form, tr("Audio gain"), 0, 3, 0.35, 0.05, 3);
@@ -75,6 +79,7 @@ public:
         form->addRow(tr("Audio band"), band_);
         contentLayout->addLayout(form);
         apply_ = new QPushButton(tr("Apply to live visualizer"));
+        apply_->setObjectName(QStringLiteral("sprite-apply"));
         contentLayout->addWidget(apply_);
         settingsScroll->setWidget(content);
         auto* boxLayout = new QVBoxLayout(settings);
