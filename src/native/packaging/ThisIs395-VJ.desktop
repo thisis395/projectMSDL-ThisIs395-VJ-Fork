@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ThisIs395 VJ
+Comment=Native VJ workstation with pop-out projectM visualizer
+Exec=ThisIs395-VJ
+Icon=ThisIs395-VJ-ControlCenter
+Terminal=false
+Categories=AudioVideo;Audio;Video;
