@@ -3,7 +3,8 @@
 find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
 add_executable(ThisIs395-VJ-ControlCenter WIN32
     NativeControlCenter.cpp
-    NativeShowEditor.h)
+    NativeShowEditor.h
+    NativeSpriteManager.h)
 target_link_libraries(ThisIs395-VJ-ControlCenter PRIVATE Qt6::Widgets)
 set_target_properties(ThisIs395-VJ-ControlCenter PROPERTIES
     CXX_STANDARD 17
