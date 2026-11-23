@@ -1,10 +1,12 @@
 #include "NativeShowEditor.h"
+#include "NativeSpriteManager.h"
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -16,6 +18,8 @@
 #include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
+#include <QQueue>
 #include <QSaveFile>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -37,7 +41,7 @@ public:
     NativeControlCenter()
     {
         setWindowTitle(QStringLiteral("ThisIs395 VJ Control Center"));
-        resize(860, 580);
+        resize(1160, 700);
         auto* tabs = new QTabWidget(this);
         setCentralWidget(tabs);
 
@@ -121,12 +125,32 @@ public:
         showEditor->setCueCallback([this](const QString& path) { sendCommand(QStringLiteral("cue"), path); });
         tabs->addTab(showEditor, tr("Show Editor"));
 
+        // Dock in the native control center or float into its own window.
+        spriteDock_ = new QDockWidget(tr("Sprite Manager"), this);
+        spriteManager_ = new NativeSpriteManager(spriteDock_);
+        spriteManager_->setDispatch([this](const QString& action, const QJsonObject& params) {
+            sendCommand(action, QString(), params);
+        });
+        spriteDock_->setWidget(spriteManager_);
+        spriteDock_->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+        spriteDock_->setFeatures(QDockWidget::DockWidgetMovable |
+                                 QDockWidget::DockWidgetFloatable |
+                                 QDockWidget::DockWidgetClosable);
+        addDockWidget(Qt::RightDockWidgetArea, spriteDock_);
+        spriteDock_->setMinimumWidth(340);
+        auto* openSprites = new QPushButton(tr("Pop out Sprite Manager"));
+        controls->addWidget(openSprites);
+        connect(openSprites, &QPushButton::clicked, this, [this] { popOutSpriteManager(); });
+
         optionsWindow_ = new QWidget(nullptr, Qt::Window);
         optionsWindow_->setWindowTitle(tr("ThisIs395 VJ - Options"));
         auto* optionsLayout = new QVBoxLayout(optionsWindow_);
         optionsLayout->addWidget(new QLabel(tr("Visualizer launch options are shown in the Visualizer tab.\n"
                                               "Changes are saved locally when launching or closing the control center.")));
-        optionsWindow_->resize(430, 160);
+        auto* optionsSprites = new QPushButton(tr("Open native Sprite Manager"));
+        optionsLayout->addWidget(optionsSprites);
+        connect(optionsSprites, &QPushButton::clicked, this, [this] { popOutSpriteManager(); });
+        optionsWindow_->resize(430, 200);
         auto* optionsButton = new QPushButton(tr("Pop out options"));
         controls->addWidget(optionsButton);
         connect(optionsButton, &QPushButton::clicked, optionsWindow_, [this] {
@@ -151,6 +175,9 @@ public:
             if (error == QProcess::FailedToStart) {
                 mailboxPoll_.stop();
                 pendingId_.clear();
+                pendingAction_.clear();
+                queuedCommands_.clear();
+                spriteManager_->setConnected(false);
                 setRunning(false);
             }
         });
@@ -159,6 +186,10 @@ public:
                     status_->setText(tr("Visualizer exited with code %1").arg(exitCode));
                     mailboxPoll_.stop();
                     pendingId_.clear();
+                    pendingAction_.clear();
+                    queuedCommands_.clear();
+                    spriteManager_->setConnected(false);
+                    spriteManager_->setState(QJsonArray());
                     setRunning(false);
                 });
         connect(&mailboxPoll_, &QTimer::timeout, this, [this] { readResponse(); });
@@ -223,70 +254,155 @@ private:
         process_.setWorkingDirectory(QFileInfo(executable).absolutePath());
         status_->setText(tr("Starting visualizer..."));
         setRunning(true);
+        spriteManager_->setConnected(false);
+        spriteManager_->setState(QJsonArray());
+        queuedCommands_.clear();
         process_.start();
         mailboxPoll_.start();
         sendHandshakeOnStart_ = true;
     }
 
 
-    void sendCommand(const QString& action, const QString& path = QString())
+    void popOutSpriteManager()
+    {
+        if (!spriteDock_) return;
+        spriteDock_->show();
+        spriteDock_->setFloating(true);
+        spriteDock_->resize(500, 750);
+        spriteDock_->raise();
+        spriteDock_->activateWindow();
+        if (spriteManager_ && process_.state() == QProcess::Running)
+            sendCommand(QStringLiteral("sprite.list"));
+    }
+
+    struct Command {
+        QString action;
+        QString path;
+        QJsonObject params;
+    };
+
+    void sendCommand(const QString& action, const QString& path = QString(),
+                     const QJsonObject& params = QJsonObject())
     {
         if (process_.state() != QProcess::Running) {
             status_->setText(tr("Launch the visualizer before sending commands."));
+            if (action.startsWith(QStringLiteral("sprite.")))
+                spriteManager_->setStatus(tr("Launch the visualizer first."));
             return;
         }
+
+        // Only one command may occupy the mailbox. Queue controls rather than
+        // drop changes while a prior slider adjustment awaits acknowledgment.
         if (!pendingId_.isEmpty()) {
-            status_->setText(tr("Waiting for the previous renderer response."));
+            if (action == QStringLiteral("sprite.update") && !queuedCommands_.isEmpty() &&
+                queuedCommands_.last().action == action &&
+                queuedCommands_.last().params.value(QStringLiteral("index")) ==
+                    params.value(QStringLiteral("index"))) {
+                queuedCommands_.last() = {action, path, params};
+                return;
+            }
+            if (queuedCommands_.size() >= 32) {
+                status_->setText(tr("Renderer command queue full. Try again after it catches up."));
+                return;
+            }
+            queuedCommands_.enqueue({action, path, params});
             return;
         }
+
         pendingId_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        pendingAction_ = action;
         pendingElapsed_.start();
         QJsonObject request{{QStringLiteral("version"), 1},
                             {QStringLiteral("id"), pendingId_},
                             {QStringLiteral("action"), action}};
-        if (action == QStringLiteral("cue")) request.insert(QStringLiteral("path"), path);
+        if (action == QStringLiteral("cue"))
+            request.insert(QStringLiteral("path"), path);
+        for (auto it = params.constBegin(); it != params.constEnd(); ++it)
+            request.insert(it.key(), it.value());
+
         QSaveFile file(mailboxDir_.filePath(QStringLiteral("command.json")));
         if (!file.open(QIODevice::WriteOnly) ||
             file.write(QJsonDocument(request).toJson(QJsonDocument::Compact)) < 0 ||
             !file.commit()) {
             pendingId_.clear();
+            pendingAction_.clear();
             status_->setText(tr("Unable to write renderer command."));
+            if (action.startsWith(QStringLiteral("sprite.")))
+                spriteManager_->setStatus(tr("Unable to write live sprite command."));
             return;
         }
         status_->setText(tr("Sent %1; awaiting renderer.").arg(action));
     }
 
+    void sendNextQueuedCommand()
+    {
+        if (pendingId_.isEmpty() && !queuedCommands_.isEmpty()) {
+            const Command next = queuedCommands_.dequeue();
+            sendCommand(next.action, next.path, next.params);
+        }
+    }
+
     void readResponse()
     {
-        if (sendHandshakeOnStart_ && process_.state() == QProcess::Running && pendingId_.isEmpty()) {
+        if (sendHandshakeOnStart_ && process_.state() == QProcess::Running &&
+            pendingId_.isEmpty()) {
             sendHandshakeOnStart_ = false;
             sendCommand(QStringLiteral("ping"));
         }
+
         const QString path = mailboxDir_.filePath(QStringLiteral("response.json"));
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) {
-            if (!pendingId_.isEmpty() && pendingElapsed_.isValid() && pendingElapsed_.elapsed() > 5000) {
+            if (!pendingId_.isEmpty() && pendingElapsed_.isValid() &&
+                pendingElapsed_.elapsed() > 5000) {
+                const bool wasSpriteCommand = pendingAction_.startsWith(QStringLiteral("sprite."));
                 pendingId_.clear();
+                pendingAction_.clear();
+                queuedCommands_.clear();
                 QFile::remove(mailboxDir_.filePath(QStringLiteral("command.json")));
                 status_->setText(tr("Renderer did not respond within 5 seconds."));
+                if (wasSpriteCommand)
+                    spriteManager_->setStatus(tr("Live renderer timed out; refresh to resync."));
             }
             return;
         }
+
         const auto response = QJsonDocument::fromJson(file.readAll()).object();
         file.close();
         QFile::remove(path);
-        if (response.value(QStringLiteral("id")).toString() != pendingId_ || pendingId_.isEmpty())
+        if (response.value(QStringLiteral("id")).toString() != pendingId_ ||
+            pendingId_.isEmpty())
             return;
+
+        const QString action = pendingAction_;
         pendingId_.clear();
-        if (!response.value(QStringLiteral("ok")).toBool()) {
-            status_->setText(tr("Renderer rejected command: %1")
-                                 .arg(response.value(QStringLiteral("error")).toString()));
-            return;
+        pendingAction_.clear();
+        const bool ok = response.value(QStringLiteral("ok")).toBool();
+        if (ok && action == QStringLiteral("ping"))
+            spriteManager_->setConnected(true);
+        if (ok && response.value(QStringLiteral("sprites")).isArray()) {
+            // Defer a state refresh until all pending slider edits have landed.
+            if (queuedCommands_.isEmpty() || action != QStringLiteral("sprite.update"))
+                spriteManager_->setState(response.value(QStringLiteral("sprites")).toArray());
         }
-        status_->setText(tr("Renderer connected. Preset #%1, shuffle: %2, locked: %3")
-                             .arg(response.value(QStringLiteral("presetIndex")).toInt())
-                             .arg(response.value(QStringLiteral("shuffle")).toBool() ? tr("on") : tr("off"))
-                             .arg(response.value(QStringLiteral("locked")).toBool() ? tr("yes") : tr("no")));
+        if (!ok) {
+            const QString error = response.value(QStringLiteral("error")).toString();
+            status_->setText(tr("Renderer rejected command: %1").arg(error));
+            if (action.startsWith(QStringLiteral("sprite.")))
+                spriteManager_->setStatus(error);
+        } else {
+            status_->setText(tr("Renderer connected. Preset #%1, shuffle: %2, locked: %3")
+                .arg(response.value(QStringLiteral("presetIndex")).toInt())
+                .arg(response.value(QStringLiteral("shuffle")).toBool() ? tr("on") : tr("off"))
+                .arg(response.value(QStringLiteral("locked")).toBool() ? tr("yes") : tr("no")));
+            if (action == QStringLiteral("sprite.update"))
+                spriteManager_->setStatus(tr("Live sprite settings applied."));
+            else if (action == QStringLiteral("sprite.add"))
+                spriteManager_->setStatus(tr("PNG sprite added to visualizer."));
+            else if (action == QStringLiteral("sprite.remove"))
+                spriteManager_->setStatus(tr("Live sprite removed."));
+        }
+        sendNextQueuedCommand();
     }
 
     void restoreSettings()
@@ -317,6 +433,8 @@ private:
     QTemporaryDir mailboxDir_;
     QTimer mailboxPoll_;
     QString pendingId_;
+    QString pendingAction_;
+    QQueue<Command> queuedCommands_;
     QElapsedTimer pendingElapsed_;
     bool sendHandshakeOnStart_ = false;
     QLineEdit* executable_ = nullptr;
@@ -330,6 +448,8 @@ private:
     QLabel* status_ = nullptr;
     QPlainTextEdit* output_ = nullptr;
     QWidget* optionsWindow_ = nullptr;
+    QDockWidget* spriteDock_ = nullptr;
+    NativeSpriteManager* spriteManager_ = nullptr;
 };
 
 int main(int argc, char** argv)
