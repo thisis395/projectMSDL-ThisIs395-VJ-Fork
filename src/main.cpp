@@ -2,7 +2,7 @@
 
 #include <SDL2/SDL.h>
 
-int main(int argc, char* argv[])
+int RunProjectMRenderer(int argc, char* argv[])
 {
     Poco::AutoPtr<ProjectMSDLApplication> pApp = new ProjectMSDLApplication;
     try
@@ -16,3 +16,14 @@ int main(int argc, char* argv[])
     }
     return pApp->run();
 }
+
+
+// The standalone SDL application remains available when Qt is disabled.
+// The integrated Qt application calls RunProjectMRenderer from its child mode,
+// so only one user-facing executable needs to be installed.
+#ifndef THISIS395_VJ_EMBEDDED_RENDERER
+int main(int argc, char* argv[])
+{
+    return RunProjectMRenderer(argc, argv);
+}
+#endif
