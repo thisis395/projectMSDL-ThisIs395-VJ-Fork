@@ -55,6 +55,17 @@ public:
         actions->addWidget(refresh_);
         root->addLayout(actions);
 
+        // Imported assets and live renderer sprites are different states.
+        // Previously the only list was the live renderer snapshot, so even a
+        // selected PNG simply vanished from view when renderer import failed.
+        auto* libraryTitle = new QLabel(tr("Imported PNG files (double-click to retry loading)"));
+        root->addWidget(libraryTitle);
+        library_ = new QListWidget;
+        library_->setObjectName(QStringLiteral("sprite-import-library"));
+        library_->setMaximumHeight(100);
+        root->addWidget(library_);
+        root->addWidget(new QLabel(tr("Sprites currently active in visualizer")));
+
         list_ = new QListWidget;
         list_->setObjectName(QStringLiteral("sprite-live-list"));
         list_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -128,6 +139,11 @@ public:
         connect(apply_, &QPushButton::clicked, this, [this] { applyChanges(); });
         connect(list_, &QListWidget::currentRowChanged, this,
                 [this](int row) { loadSelection(row); });
+        connect(library_, &QListWidget::itemDoubleClicked, this,
+                [this](QListWidgetItem* item) {
+                    if (item) dispatch(QStringLiteral("sprite.add"),
+                        {{QStringLiteral("path"), item->data(Qt::UserRole).toString()}});
+                });
         connect(band_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [this](int) { if (!syncing_) applyChanges(); });
     }
@@ -150,6 +166,19 @@ public:
             return;
         }
         const QString path = file.absoluteFilePath();
+        bool alreadyListed = false;
+        for (int i = 0; i < library_->count(); ++i) {
+            if (library_->item(i)->data(Qt::UserRole).toString() == path) {
+                alreadyListed = true;
+                break;
+            }
+        }
+        if (!alreadyListed) {
+            auto* item = new QListWidgetItem(tr("Queued: %1").arg(file.fileName()));
+            item->setData(Qt::UserRole, path);
+            item->setToolTip(path);
+            library_->addItem(item);
+        }
         setStatus(tr("Importing %1...").arg(file.fileName()));
         dispatch(QStringLiteral("sprite.add"), {{QStringLiteral("path"), path}});
     }
@@ -183,6 +212,19 @@ public:
         }
 
         data_ = items;
+        for (int i = 0; i < library_->count(); ++i) {
+            auto* candidate = library_->item(i);
+            const QString libraryPath = candidate->data(Qt::UserRole).toString();
+            bool active = false;
+            for (const auto& item : items) {
+                if (item.toObject().value(QStringLiteral("path")).toString() == libraryPath) {
+                    active = true;
+                    break;
+                }
+            }
+            candidate->setText((active ? tr("Live: %1") : tr("Not live: %1"))
+                .arg(QFileInfo(libraryPath).fileName()));
+        }
         if (pathsChanged) {
             const QString previousPath = list_->currentItem()
                 ? list_->currentItem()->data(Qt::UserRole).toString()
@@ -344,6 +386,7 @@ private:
     bool connected_ = false;
     bool syncing_ = false;
     QListWidget* list_ = nullptr;
+    QListWidget* library_ = nullptr;
     QDoubleSpinBox *x_ = nullptr, *y_ = nullptr, *scale_ = nullptr,
                    *opacity_ = nullptr, *rotation_ = nullptr, *gain_ = nullptr;
     QComboBox* band_ = nullptr;
