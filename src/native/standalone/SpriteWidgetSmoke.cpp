@@ -3,6 +3,10 @@
 #include <QApplication>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QFileDialog>
+#include <QImage>
+#include <QTemporaryDir>
+#include <QFileInfo>
 #include <QListWidget>
 #include <QLineEdit>
 #include <QPushButton>
@@ -47,8 +51,35 @@ int main(int argc, char* argv[])
     require(!remove->isEnabled() && !apply->isEnabled(),
             "Remove and Apply must wait for sprite selection");
 
+    // Exercise a *real PNG* through Add PNG -> file dialog -> fileSelected,
+    // not just direct dispatch. Earlier CI never clicked the import button.
+    QTemporaryDir working;
+    require(working.isValid(), "Unable to create temporary test folder");
+    const QString pngPath = working.filePath(QStringLiteral("my sprite file.png"));
+    QImage image(32, 32, QImage::Format_RGBA8888);
+    image.fill(QColor(0, 255, 0, 255));
+    require(image.save(pngPath, "PNG"), "Unable to save temporary test PNG");
+
+    add->click();
+    auto* picker = manager.findChild<QFileDialog*>(
+        QStringLiteral("sprite-file-picker"));
+    require(picker != nullptr, "Add PNG button did not open a QFileDialog");
+    picker->selectFile(pngPath);
+    picker->accept();
+    require(!requests.empty() && requests.back().action == QStringLiteral("sprite.add"),
+            "Choosing a PNG did not dispatch sprite.add");
+    require(requests.back().args.value(QStringLiteral("path")).toString() == pngPath,
+            "PNG picker lost its original absolute file path");
+
+    auto* library = manager.findChild<QListWidget*>(
+        QStringLiteral("sprite-import-library"));
+    require(library && library->count() == 1,
+            "Selected PNG did not appear in the imported PNG library");
+
+    const auto requestCount = requests.size();
     refresh->click();
-    require(requests.size() == 1 && requests.back().action == QStringLiteral("sprite.list"),
+    require(requests.size() == requestCount + 1 &&
+                requests.back().action == QStringLiteral("sprite.list"),
             "Refresh button did not dispatch sprite.list");
     manager.setConnected(true);
 
@@ -104,6 +135,6 @@ int main(int argc, char* argv[])
     manager.setConnected(false);
     require(add->isEnabled() && refresh->isEnabled(),
             "Offline state should still allow importing and refreshing");
-    std::cout << "PASS: native sprite buttons, 40 repeated snapshots, typing preservation and scale dispatch\n";
+    std::cout << "PASS: actual PNG chooser/import and library, native sprite buttons, 40 snapshots, typing and scale\n";
     return 0;
 }
