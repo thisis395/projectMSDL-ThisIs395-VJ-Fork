@@ -2,6 +2,7 @@
 
 #include <Poco/File.h>
 #include <Poco/JSON/Object.h>
+#include <Poco/JSON/Array.h>
 #include <Poco/JSON/Parser.h>
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/Path.h>
@@ -17,6 +18,7 @@
 #include <string>
 
 #include "notifications/PlaybackControlNotification.h"
+#include "gui/SpriteManagerWindow.h"
 
 // Local-only, single-inflight v1 command mailbox. Called exclusively on the SDL
 // render thread, so libprojectM calls never race against rendering.
@@ -27,7 +29,7 @@ public:
 
     bool enabled() const { return !directory_.empty(); }
 
-    void poll(projectm_handle renderer, projectm_playlist_handle playlist) {
+    void poll(projectm_handle renderer, projectm_playlist_handle playlist, SpriteManagerWindow& sprites) {
         if (!enabled() || !renderer || !playlist) return;
         Poco::Path input(directory_);
         input.append("command.json");
@@ -66,6 +68,29 @@ public:
                 post(PlaybackControlNotification::Action::ToggleShuffle);
             } else if (action == "lock") {
                 post(PlaybackControlNotification::Action::TogglePresetLocked);
+            } else if (action == "sprite.list") {
+                // Return all renderer-owned sprites below.
+            } else if (action == "sprite.add") {
+                if (!sprites.AddFile(request->getValue<std::string>("path")))
+                    throw Poco::InvalidArgumentException(sprites.Status());
+            } else if (action == "sprite.remove") {
+                const int index = request->getValue<int>("index");
+                if (index < 0 || !sprites.RemoveManagedSprite(static_cast<std::size_t>(index)))
+                    throw Poco::InvalidArgumentException(index < 0 ? "Invalid sprite index" : sprites.Status());
+            } else if (action == "sprite.update") {
+                const int index = request->getValue<int>("index");
+                if (index < 0)
+                    throw Poco::InvalidArgumentException("Invalid sprite index");
+                SpriteManagerWindow::Controls controls;
+                controls.x = static_cast<float>(request->getValue<double>("x"));
+                controls.y = static_cast<float>(request->getValue<double>("y"));
+                controls.scale = static_cast<float>(request->getValue<double>("scale"));
+                controls.opacity = static_cast<float>(request->getValue<double>("opacity"));
+                controls.rotation = static_cast<float>(request->getValue<double>("rotationRadians"));
+                controls.gain = static_cast<float>(request->getValue<double>("gain"));
+                controls.audioBand = request->getValue<int>("audioBand");
+                if (!sprites.UpdateManagedSprite(static_cast<std::size_t>(index), controls))
+                    throw Poco::InvalidArgumentException(sprites.Status());
             } else if (action == "cue") {
                 const auto path = request->getValue<std::string>("path");
                 bool found = false;
@@ -83,6 +108,22 @@ public:
                 if (!found) throw Poco::NotFoundException("Preset is not in the live playlist");
             } else {
                 throw Poco::InvalidArgumentException("Unknown action");
+            }
+            if (action == "ping" || action.compare(0, 7, "sprite.") == 0) {
+                Poco::JSON::Array::Ptr live = new Poco::JSON::Array;
+                for (const auto& sprite : sprites.Snapshot()) {
+                    Poco::JSON::Object::Ptr item = new Poco::JSON::Object;
+                    item->set("path", sprite.path);
+                    item->set("x", sprite.x);
+                    item->set("y", sprite.y);
+                    item->set("scale", sprite.scale);
+                    item->set("opacity", sprite.opacity);
+                    item->set("rotationRadians", sprite.rotation);
+                    item->set("gain", sprite.gain);
+                    item->set("audioBand", sprite.audioBand);
+                    live->add(item);
+                }
+                reply->set("sprites", live);
             }
             reply->set("ok", true);
             reply->set("shuffle", projectm_playlist_get_shuffle(playlist));
