@@ -45,6 +45,7 @@ public:
 
         auto* actions = new QHBoxLayout;
         add_ = new QPushButton(tr("Add PNG..."));
+        add_->setObjectName(QStringLiteral("sprite-add"));
         remove_ = new QPushButton(tr("Remove"));
         remove_->setObjectName(QStringLiteral("sprite-remove"));
         refresh_ = new QPushButton(tr("Refresh"));
@@ -107,6 +108,11 @@ public:
             auto* dialog = new QFileDialog(this, tr("Add transparent PNG sprite"));
             dialog->setFileMode(QFileDialog::ExistingFile);
             dialog->setNameFilter(tr("PNG images (*.png)"));
+            // The native Windows file picker can outlive a temporary Qt
+            // widget and its callbacks. Keep selection inside the Qt event
+            // loop and make the same path testable on every platform.
+            dialog->setOption(QFileDialog::DontUseNativeDialog, true);
+            dialog->setObjectName(QStringLiteral("sprite-file-picker"));
             dialog->setAttribute(Qt::WA_DeleteOnClose);
             connect(dialog, &QFileDialog::fileSelected, this,
                     [this](const QString& selected) { importSpriteFile(selected); });
