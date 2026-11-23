@@ -134,8 +134,10 @@ public:
         // Do not clobber controls while their spinbox is being edited.
         // Previously every acknowledgment rebuilt the list and reset
         // user-entered numbers, making sliders look unresponsive.
+        const std::initializer_list<QDoubleSpinBox*> controls{
+            x_, y_, scale_, opacity_, rotation_, gain_};
         const bool editing = std::any_of(
-            std::initializer_list<QDoubleSpinBox*>{x_, y_, scale_, opacity_, rotation_, gain_},
+            controls.begin(), controls.end(),
             [](QDoubleSpinBox* spin) { return spin && spin->hasFocus(); });
         data_ = items;
         syncing_ = true;
