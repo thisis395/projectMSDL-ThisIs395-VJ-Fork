@@ -121,7 +121,18 @@ include(SDL2Target)
 include(dependencies_check.cmake)
 include(ImGui.cmake)
 
+# Qt is opt-in for upstream's SDL-only build. The integrated mode compiles
+# both Qt UI and the existing projectM engine into one distributable binary.
+option(ENABLE_QT_NATIVE_UI "Build the Qt6 control center" OFF)
+option(ENABLE_VJ_SINGLE_BINARY "Compile Qt UI and SDL renderer into one executable with pop-out window" OFF)
+if(ENABLE_VJ_SINGLE_BINARY AND NOT ENABLE_QT_NATIVE_UI)
+    message(FATAL_ERROR "ENABLE_VJ_SINGLE_BINARY requires ENABLE_QT_NATIVE_UI=ON")
+endif()
+
 add_subdirectory(src)
+if(ENABLE_QT_NATIVE_UI)
+    add_subdirectory(src/native)
+endif()
 
 if(ENABLE_TESTING)
     add_subdirectory(test)
@@ -145,8 +156,3 @@ message(STATUS "    Configuration file:  ${DEFAULT_CONFIG_PATH}")
 message(STATUS "    Presets:             ${DEFAULT_PRESETS_PATH}")
 message(STATUS "    Textures:            ${DEFAULT_TEXTURES_PATH}")
 
-# Qt is opt-in until the native controls replace the legacy ImGui editors.
-option(ENABLE_QT_NATIVE_UI "Build the separate Qt6 native control center" OFF)
-if(ENABLE_QT_NATIVE_UI)
-    add_subdirectory(src/native)
-endif()
