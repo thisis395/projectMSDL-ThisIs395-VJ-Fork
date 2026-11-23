@@ -37,3 +37,10 @@ set_source_files_properties("${VJ_PORTRAIT_ICON}" PROPERTIES
 qt_add_resources(ThisIs395-VJ-ControlCenter "thisis395_portrait"
     PREFIX "/thisis395" FILES "${VJ_PORTRAIT_ICON}")
 
+
+# Widget-level regression coverage. The actual renderer IPC is separately
+# exercised by tools/test_native_sprite_ipc.py in the unified Linux workflow.
+enable_testing()
+add_executable(ThisIs395-VJ-SpriteWidgetSmoke SpriteWidgetSmoke.cpp ../NativeSpriteManager.h)
+target_link_libraries(ThisIs395-VJ-SpriteWidgetSmoke PRIVATE Qt6::Widgets)
+add_test(NAME NativeSpriteManagerButtons COMMAND ThisIs395-VJ-SpriteWidgetSmoke)
