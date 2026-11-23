@@ -2,6 +2,11 @@
 #include "NativeSpriteManager.h"
 
 #include <QApplication>
+#include <QIcon>
+#include <QPixmap>
+#include <QByteArray>
+#include <cstring>
+#include <vector>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
@@ -35,6 +40,10 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+extern int RunProjectMRenderer(int argc, char* argv[]);
+#endif
+
 class NativeControlCenter final : public QMainWindow
 {
 public:
@@ -42,6 +51,7 @@ public:
     {
         setWindowTitle(QStringLiteral("ThisIs395 VJ Control Center"));
         resize(1160, 700);
+        setWindowIcon(QIcon(QStringLiteral(":/thisis395/portrait.png")));
         auto* tabs = new QTabWidget(this);
         setCentralWidget(tabs);
 
@@ -58,7 +68,9 @@ public:
         height_->setRange(240, 16384);
         fullscreen_ = new QCheckBox(tr("Start fullscreen"));
 
-#ifdef Q_OS_WIN
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+        const QString defaultExecutable = QCoreApplication::applicationFilePath();
+#elif defined(Q_OS_WIN)
         const QString defaultExecutable = QStringLiteral("projectMSDL.exe");
 #elif defined(Q_OS_MACOS)
         const QString defaultExecutable = QStringLiteral("projectM");
@@ -91,11 +103,25 @@ public:
         visualLayout->addWidget(launchSettings);
 
         auto* controls = new QHBoxLayout;
-        start_ = new QPushButton(tr("Launch visualizer"));
-        stop_ = new QPushButton(tr("Stop visualizer"));
+        start_ = new QPushButton(tr("Pop out visualizer"));
+        stop_ = new QPushButton(tr("Close visualizer"));
         stop_->setEnabled(false);
         controls->addWidget(start_);
         controls->addWidget(stop_);
+        auto* focus = new QPushButton(tr("Show / focus visualizer"));
+        controls->addWidget(focus);
+        auto* hide = new QPushButton(tr("Hide visualizer"));
+        controls->addWidget(hide);
+        connect(focus, &QPushButton::clicked, this, [this] {
+            if (process_.state() == QProcess::NotRunning)
+                launchVisualizer();
+            else
+                sendCommand(QStringLiteral("window.focus"));
+        });
+        connect(hide, &QPushButton::clicked, this, [this] {
+            if (process_.state() == QProcess::Running)
+                sendCommand(QStringLiteral("window.hide"));
+        });
         controls->addStretch();
         visualLayout->addLayout(controls);
         auto* liveControls = new QHBoxLayout;
@@ -238,6 +264,10 @@ private:
         }
         saveSettings();
         QStringList args;
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+        // Same executable: renderer mode creates the separate SDL/OpenGL window.
+        args << QStringLiteral("--vj-renderer");
+#endif
         if (!presetPath_->text().trimmed().isEmpty())
             args << QStringLiteral("--presetPath") << presetPath_->text().trimmed();
         if (!texturePath_->text().trimmed().isEmpty())
@@ -412,7 +442,13 @@ private:
     void restoreSettings()
     {
         QSettings s;
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+        // Never restore a stale path to the now-removed second renderer binary.
+        executable_->setText(QCoreApplication::applicationFilePath());
+        executable_->setReadOnly(true);
+#else
         executable_->setText(s.value(QStringLiteral("executable"), executable_->text()).toString());
+#endif
         presetPath_->setText(s.value(QStringLiteral("presetPath")).toString());
         texturePath_->setText(s.value(QStringLiteral("texturePath")).toString());
         width_->setValue(s.value(QStringLiteral("width"), 1280).toInt());
@@ -458,6 +494,16 @@ private:
 
 int main(int argc, char** argv)
 {
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    if (argc > 1 && std::strcmp(argv[1], "--vj-renderer") == 0) {
+        std::vector<char*> rendererArgs;
+        rendererArgs.reserve(static_cast<std::size_t>(argc));
+        rendererArgs.push_back(argv[0]);
+        for (int i = 2; i < argc; ++i)
+            rendererArgs.push_back(argv[i]);
+        return RunProjectMRenderer(static_cast<int>(rendererArgs.size()), rendererArgs.data());
+    }
+#endif
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("ThisIs395"));
     QCoreApplication::setApplicationName(QStringLiteral("VJ Control Center"));
