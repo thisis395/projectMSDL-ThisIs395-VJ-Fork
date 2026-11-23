@@ -179,6 +179,11 @@ public:
             item->setToolTip(path);
             library_->addItem(item);
         }
+        for (int i = 0; i < library_->count(); ++i) {
+            auto* item = library_->item(i);
+            if (item->data(Qt::UserRole).toString() == path)
+                item->setText(tr("Queued: %1").arg(file.fileName()));
+        }
         setStatus(tr("Importing %1...").arg(file.fileName()));
         dispatch(QStringLiteral("sprite.add"), {{QStringLiteral("path"), path}});
     }
@@ -195,6 +200,17 @@ public:
     }
 
     void setStatus(const QString& message) { status_->setText(message); }
+
+    void reportImportFailure(const QString& path, const QString& error) {
+        for (int i = 0; i < library_->count(); ++i) {
+            auto* item = library_->item(i);
+            if (item->data(Qt::UserRole).toString() == path) {
+                item->setText(tr("Failed: %1").arg(QFileInfo(path).fileName()));
+                item->setToolTip(error + QStringLiteral("\n") + path);
+            }
+        }
+        setStatus(tr("PNG not loaded: %1").arg(error));
+    }
 
     void setState(const QJsonArray& items, bool refreshControls = false) {
         // Renderer replies arrive for every update, sometimes many times per
