@@ -102,6 +102,9 @@ public:
     /** Opens the ThisIs395 VJ user sprite manager. */
     void ShowSpriteManagerWindow();
 
+    /** Shared live Sprite Manager for native Qt commands on the render thread. */
+    SpriteManagerWindow& ManagedSprites() { return _spriteManagerWindow; }
+
     /**
      * @brief Displays the about window.
      */
