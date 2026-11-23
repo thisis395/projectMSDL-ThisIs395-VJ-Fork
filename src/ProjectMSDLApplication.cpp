@@ -54,7 +54,13 @@ void ProjectMSDLApplication::initialize(Poco::Util::Application& self)
     // So we put command-line overrides just below settings changed in the UI.
     config().add(_commandLineOverrides, PRIO_APPLICATION + 10);
 
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    // Qt and SDL now use the same binary, but preserve the installed
+    // projectMSDL/projectM configuration name and users' existing settings.
+    const std::string configFileName = PROJECTMSDL_INSTALLED_CONFIG_FILE;
+#else
     std::string configFileName = config().getString("application.baseName") + ".properties";
+#endif
     Poco::Path userConfigurationDir = Poco::Path::configHome();
     userConfigurationDir.makeDirectory().append("projectM/");
 
