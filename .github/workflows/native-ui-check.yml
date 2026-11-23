@@ -70,6 +70,9 @@ jobs:
       - name: Compile native Qt application
         shell: bash
         run: cmake --build build/native --parallel 2
+      - name: Exercise native Sprite Manager buttons
+        shell: bash
+        run: ctest --test-dir build/native --output-on-failure
       - name: Bundle Windows Qt DLLs and platform plugins
         if: runner.os == 'Windows'
         shell: pwsh
