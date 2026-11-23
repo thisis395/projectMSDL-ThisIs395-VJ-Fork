@@ -3,6 +3,10 @@
 #include <QAbstractSpinBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QApplication>
+#include <QImageReader>
+#include <QImage>
+#include <QSize>
 #include <QFileDialog>
 #include <QFrame>
 #include <QAbstractItemView>
@@ -93,14 +97,23 @@ public:
         setStatus(tr("Add PNG starts the visualizer automatically. Select a loaded sprite to enable its controls."));
 
         connect(add_, &QPushButton::clicked, this, [this] {
-            const QString path = QFileDialog::getOpenFileName(
-                this, tr("Add transparent PNG sprite"), QString(), tr("PNG images (*.png)"));
-            if (path.isEmpty()) return;
-            if (list_->count() >= 16) {
-                setStatus(tr("Only 16 live sprites are supported."));
-                return;
-            }
-            dispatch(QStringLiteral("sprite.add"), {{QStringLiteral("path"), QFileInfo(path).absoluteFilePath()}});
+            // Non-blocking dialog: do not nest a modal Qt event loop while
+            // command acknowledgments and the SDL renderer are active.
+            auto* dialog = new QFileDialog(this, tr("Add transparent PNG sprite"));
+            dialog->setFileMode(QFileDialog::ExistingFile);
+            dialog->setNameFilter(tr("PNG images (*.png)"));
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            connect(dialog, &QFileDialog::fileSelected, this, [this](const QString& selected) {
+                if (selected.isEmpty()) return;
+                if (list_->count() >= 16) {
+                    setStatus(tr("Only 16 live sprites are supported."));
+                    return;
+                }
+                const QString path = QFileInfo(selected).absoluteFilePath();
+                setStatus(tr("Importing %1...").arg(QFileInfo(path).fileName()));
+                dispatch(QStringLiteral("sprite.add"), {{QStringLiteral("path"), path}});
+            });
+            dialog->open();
         });
         connect(remove_, &QPushButton::clicked, this, [this] {
             if (list_->currentRow() < 0) return;
@@ -131,46 +144,62 @@ public:
 
     void setStatus(const QString& message) { status_->setText(message); }
 
-    void setState(const QJsonArray& items) {
-        QString previousPath;
-        if (auto* selected = list_->currentItem())
-            previousPath = selected->data(Qt::UserRole).toString();
-        const int previousRow = list_->currentRow();
-        // Do not clobber controls while their spinbox is being edited.
-        // Previously every acknowledgment rebuilt the list and reset
-        // user-entered numbers, making sliders look unresponsive.
-        const std::initializer_list<QDoubleSpinBox*> controls{
-            x_, y_, scale_, opacity_, rotation_, gain_};
-        const bool editing = std::any_of(
-            controls.begin(), controls.end(),
-            [](QDoubleSpinBox* spin) { return spin && spin->hasFocus(); });
+    void setState(const QJsonArray& items, bool refreshControls = false) {
+        // Renderer replies arrive for every update, sometimes many times per
+        // second. Do not clear the list or re-decode a potentially huge PNG
+        // merely because a new scale/gain acknowledgment arrived.
+        bool pathsChanged = list_->count() != items.size();
+        if (!pathsChanged) {
+            for (int i = 0; i < items.size(); ++i) {
+                const QString nextPath = items.at(i).toObject().value(QStringLiteral("path")).toString();
+                if (list_->item(i)->data(Qt::UserRole).toString() != nextPath) {
+                    pathsChanged = true;
+                    break;
+                }
+            }
+        }
+
         data_ = items;
-        syncing_ = true;
-        {
+        if (pathsChanged) {
+            const QString previousPath = list_->currentItem()
+                ? list_->currentItem()->data(Qt::UserRole).toString()
+                : QString();
+            const int previousRow = list_->currentRow();
             QSignalBlocker blocker(list_);
             list_->clear();
-            for (const auto& value : data_) {
+            for (const auto& value : items) {
                 const QString path = value.toObject().value(QStringLiteral("path")).toString();
                 auto* item = new QListWidgetItem(QFileInfo(path).fileName());
                 item->setData(Qt::UserRole, path);
                 item->setToolTip(path);
                 list_->addItem(item);
             }
-            int target = -1;
+            int selected = -1;
             for (int i = 0; i < list_->count(); ++i) {
                 if (list_->item(i)->data(Qt::UserRole).toString() == previousPath) {
-                    target = i;
+                    selected = i;
                     break;
                 }
             }
-            if (target < 0 && list_->count() > 0)
-                target = std::min(previousRow >= 0 ? previousRow : 0, list_->count() - 1);
-            list_->setCurrentRow(target);
+            if (selected < 0 && list_->count() > 0)
+                selected = std::min(previousRow >= 0 ? previousRow : 0, list_->count() - 1);
+            list_->setCurrentRow(selected);
         }
-        syncing_ = false;
-        // Preserve the in-progress edit until focus leaves the spinbox.
-        if (!editing) loadSelection(list_->currentRow());
-        else updateSelectionEnabled();
+
+        // Do not erase partially typed numeric values when a network/IPC
+        // acknowledgment arrives. Explicit Refresh may update the controls,
+        // but not while an editor owns keyboard focus.
+        QWidget* focus = QApplication::focusWidget();
+        const std::initializer_list<QDoubleSpinBox*> controls{
+            x_, y_, scale_, opacity_, rotation_, gain_};
+        const bool editing = focus && std::any_of(
+            controls.begin(), controls.end(), [focus](QDoubleSpinBox* spin) {
+                return spin && (spin == focus || spin->isAncestorOf(focus));
+            });
+        if ((pathsChanged || refreshControls) && !editing)
+            loadSelection(list_->currentRow());
+        else
+            updateSelectionEnabled();
         setStatus(tr("%1 / 16 live sprites.").arg(list_->count()));
     }
 
@@ -186,6 +215,9 @@ private:
         auto* slider = new QSlider(Qt::Horizontal);
         auto* spin = new QDoubleSpinBox;
         spin->setDecimals(decimals);
+        // With keyboard tracking on, partial text like "0." triggered the
+        // linked slider and rewrote the spinbox while the user was typing.
+        spin->setKeyboardTracking(false);
         spin->setRange(low, high);
         spin->setSingleStep(step);
         spin->setValue(initial);
@@ -247,12 +279,21 @@ private:
             gain_->setValue(obj.value(QStringLiteral("gain")).toDouble(0.35));
             band_->setCurrentIndex(std::clamp(obj.value(QStringLiteral("audioBand")).toInt(1), 0, 3));
             const QString path = obj.value(QStringLiteral("path")).toString();
-            const QPixmap pixmap(path);
-            preview_->setPixmap(pixmap.isNull()
-                ? QPixmap()
-                : pixmap.scaled(160, 100, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            preview_->setToolTip(path);
+            if (path != previewPath_) {
+                previewPath_ = path;
+                // Preview one selected image only. Decode it close to the
+                // display size instead of repeatedly loading the full 4K PNG.
+                QImageReader reader(path);
+                reader.setAutoTransform(true);
+                const QSize original = reader.size();
+                if (original.isValid())
+                    reader.setScaledSize(original.scaled(QSize(160, 100), Qt::KeepAspectRatio));
+                const QImage small = reader.read();
+                preview_->setPixmap(small.isNull() ? QPixmap() : QPixmap::fromImage(small));
+                preview_->setToolTip(path);
+            }
         } else {
+            previewPath_.clear();
             preview_->clear();
         }
         syncing_ = false;
@@ -276,6 +317,7 @@ private:
 
     Dispatch dispatch_;
     QJsonArray data_;
+    QString previewPath_;
     bool connected_ = false;
     bool syncing_ = false;
     QListWidget* list_ = nullptr;
