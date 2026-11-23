@@ -23,6 +23,24 @@ public:
     void Show();
     void Draw();
 
+    // Native Qt editor and legacy ImGui manager share this one live sprite list.
+    // Call these only from the SDL render thread (NativeControlMailbox::poll).
+    struct Controls {
+        std::string path;
+        float x{0.5f};
+        float y{0.5f};
+        float scale{0.25f};
+        float opacity{1.0f};
+        float rotation{0.0f}; // radians; Qt presents degrees
+        float gain{0.35f};
+        int audioBand{1};
+    };
+    bool AddFile(const std::string& path);
+    bool UpdateManagedSprite(std::size_t index, const Controls& controls);
+    bool RemoveManagedSprite(std::size_t index);
+    std::vector<Controls> Snapshot() const;
+    const std::string& Status() const { return _status; }
+
 private:
     struct Sprite
     {
@@ -38,7 +56,6 @@ private:
         int audioBand{1}; // 0: off; 1: bass; 2: mids; 3: treble
     };
 
-    void AddFile(const std::string& path);
     bool CreateSprite(Sprite& sprite);
     void ApplyVariables(const Sprite& sprite);
     void RemoveSprite(std::size_t index);
