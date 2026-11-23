@@ -9,6 +9,8 @@
 #include <QByteArray>
 #include <cstring>
 #include <vector>
+#include <iostream>
+#include <cmath>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
@@ -229,6 +231,87 @@ public:
         connect(&mailboxPoll_, &QTimer::timeout, this, [this] { readResponse(); });
         mailboxPoll_.setInterval(100);
         restoreSettings();
+    }
+
+    // CI exercises the same real Qt control center the user launches,
+    // including the renderer subprocess, JSON mailbox and live widgets.
+    // --vj-control-smoke is only for automated release qualification.
+    void runEndToEndSpriteSmoke(const QString& pngPath)
+    {
+        QElapsedTimer started;
+        started.start();
+        auto* timer = new QTimer(this);
+        spriteManager_->importSpriteFile(pngPath); // exercises auto-start and queue
+        connect(timer, &QTimer::timeout, this, [this, timer, started, phase = 0]() mutable {
+            const auto fail = [this](const char* why) {
+                std::cerr << "FAIL: Qt-to-renderer Sprite Manager smoke: " << why
+                          << "\nVisualizer: " << status_->text().toStdString()
+                          << "\nOutput tail: " << output_->toPlainText().right(4000).toStdString()
+                          << std::endl;
+                QCoreApplication::exit(1);
+            };
+            if (started.elapsed() > 55000) {
+                fail("Control Center did not complete live sprite workflow within 55 seconds");
+                return;
+            }
+            if (!lastReplyOk_ && (lastReplyAction_ == QStringLiteral("sprite.add") ||
+                                  lastReplyAction_ == QStringLiteral("sprite.update") ||
+                                  lastReplyAction_ == QStringLiteral("sprite.list") ||
+                                  lastReplyAction_ == QStringLiteral("sprite.remove"))) {
+                fail("Renderer rejected native sprite command");
+                return;
+            }
+            auto* list = spriteManager_->findChild<QListWidget*>(QStringLiteral("sprite-live-list"));
+            auto* scale = spriteManager_->findChild<QDoubleSpinBox*>(QStringLiteral("sprite-scale-input"));
+            auto* apply = spriteManager_->findChild<QPushButton*>(QStringLiteral("sprite-apply"));
+            auto* refresh = spriteManager_->findChild<QPushButton*>(QStringLiteral("sprite-refresh"));
+            auto* remove = spriteManager_->findChild<QPushButton*>(QStringLiteral("sprite-remove"));
+            if (!list || !scale || !apply || !refresh || !remove) {
+                fail("Native Sprite Manager controls missing");
+                return;
+            }
+            if (phase == 0 && spriteManager_->isConnected() &&
+                lastReplyAction_ == QStringLiteral("sprite.add") &&
+                list->count() == 1 && list->currentRow() == 0) {
+                if (!apply->isEnabled() || !remove->isEnabled()) {
+                    fail("Imported sprite did not enable Apply/Remove");
+                    return;
+                }
+                scale->setValue(0.73);
+                apply->click();
+                phase = 1;
+            } else if (phase == 1 && lastReplyAction_ == QStringLiteral("sprite.update") &&
+                       pendingId_.isEmpty()) {
+                const QJsonArray data = spriteManager_->currentState();
+                if (data.size() != 1 ||
+                    std::abs(data.at(0).toObject().value(QStringLiteral("scale")).toDouble() -
+                             0.73) > 0.0001) {
+                    fail("Scale edit did not reach the live renderer");
+                    return;
+                }
+                refresh->click();
+                phase = 2;
+            } else if (phase == 2 && lastReplyAction_ == QStringLiteral("sprite.list") &&
+                       pendingId_.isEmpty()) {
+                const QJsonArray data = spriteManager_->currentState();
+                if (data.size() != 1 ||
+                    std::abs(data.at(0).toObject().value(QStringLiteral("scale")).toDouble() -
+                             0.73) > 0.0001) {
+                    fail("Refresh lost edited sprite state");
+                    return;
+                }
+                remove->click();
+                phase = 3;
+            } else if (phase == 3 && lastReplyAction_ == QStringLiteral("sprite.remove") &&
+                       pendingId_.isEmpty() && spriteManager_->currentState().isEmpty() &&
+                       list->count() == 0) {
+                timer->stop();
+                std::cout << "PASS: Qt Control Center auto-launch, live PNG list, "
+                             "button scaling, Refresh, Remove and renderer IPC" << std::endl;
+                QCoreApplication::exit(0);
+            }
+        });
+        timer->start(100);
     }
 
     ~NativeControlCenter() override
@@ -461,6 +544,8 @@ private:
         pendingId_.clear();
         pendingAction_.clear();
         const bool ok = response.value(QStringLiteral("ok")).toBool();
+        lastReplyAction_ = action;
+        lastReplyOk_ = ok;
         if (ok && action == QStringLiteral("ping")) {
             handshakeRetries_ = 0;
             rendererReady_ = true;
@@ -530,6 +615,8 @@ private:
     QElapsedTimer pendingElapsed_;
     bool sendHandshakeOnStart_ = false;
     bool rendererReady_ = false;
+    QString lastReplyAction_;
+    bool lastReplyOk_ = true;
     int handshakeRetries_ = 0;
     QLineEdit* executable_ = nullptr;
     QLineEdit* presetPath_ = nullptr;
@@ -587,5 +674,11 @@ int main(int argc, char** argv)
     QCoreApplication::setApplicationName(QStringLiteral("VJ Control Center"));
     NativeControlCenter window;
     window.show();
+    if (argc > 2 && std::strcmp(argv[1], "--vj-control-smoke") == 0) {
+        const QString pngPath = QString::fromLocal8Bit(argv[2]);
+        QTimer::singleShot(0, &window, [&window, pngPath] {
+            window.runEndToEndSpriteSmoke(pngPath);
+        });
+    }
     return app.exec();
 }
