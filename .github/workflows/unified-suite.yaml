@@ -115,6 +115,13 @@ jobs:
           fi
           echo "Native Qt frontend and embedded renderer entrypoint verified."
 
+      - name: Headless live Sprite Manager smoke test
+        run: |
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri
+          LIBGL_ALWAYS_SOFTWARE=1 timeout 90s xvfb-run -a -s "-screen 0 1280x720x24" \
+            python3 frontend-sdl2/tools/test_native_sprite_ipc.py \
+              --exe cmake-build-frontend-sdl2/src/native/ThisIs395-VJ
+
       - name: Offline render driver syntax + FFmpeg smoke test
         run: |
           sudo apt-get install -y ffmpeg
