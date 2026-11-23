@@ -152,6 +152,7 @@ public:
         visualLayout->addWidget(status_);
         output_ = new QPlainTextEdit;
         output_->setReadOnly(true);
+        output_->document()->setMaximumBlockCount(600);
         output_->setPlaceholderText(tr("Visualizer output appears here"));
         visualLayout->addWidget(output_, 1);
         tabs->addTab(visualizer, tr("Visualizer"));
@@ -198,12 +199,27 @@ public:
             if (process_.state() != QProcess::NotRunning)
                 process_.terminate();
         });
-        connect(&process_, &QProcess::readyReadStandardOutput, this, [this] {
-            output_->appendPlainText(QString::fromLocal8Bit(process_.readAllStandardOutput()));
+        // Keep renderer stdout/stderr from flooding the Qt event loop and
+        // freezing buttons/spinbox editors when the engine logs heavily.
+        auto bufferOutput = [this](const QByteArray& chunk) {
+            outputBuffer_.append(chunk);
+            if (outputBuffer_.size() > 65536)
+                outputBuffer_ = outputBuffer_.right(65536);
+        };
+        connect(&process_, &QProcess::readyReadStandardOutput, this, [this, bufferOutput] {
+            bufferOutput(process_.readAllStandardOutput());
         });
-        connect(&process_, &QProcess::readyReadStandardError, this, [this] {
-            output_->appendPlainText(QString::fromLocal8Bit(process_.readAllStandardError()));
+        connect(&process_, &QProcess::readyReadStandardError, this, [this, bufferOutput] {
+            bufferOutput(process_.readAllStandardError());
         });
+        connect(&outputPoll_, &QTimer::timeout, this, [this] {
+            if (outputBuffer_.isEmpty()) return;
+            QByteArray next;
+            next.swap(outputBuffer_);
+            output_->appendPlainText(QString::fromLocal8Bit(next));
+        });
+        outputPoll_.setInterval(250);
+        outputPoll_.start();
         connect(&process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
             status_->setText(tr("Visualizer error: %1").arg(process_.errorString()));
             if (error == QProcess::FailedToStart) {
@@ -444,6 +460,14 @@ private:
         // leaving every native sprite control disabled.
         if ((!rendererReady_ && action != QStringLiteral("ping")) ||
             !pendingId_.isEmpty()) {
+            // Refresh is idempotent. Repeated clicks should not fill the
+            // mailbox with stale snapshots and delay actual sprite edits.
+            if (action == QStringLiteral("sprite.list")) {
+                if (pendingAction_ == action) return;
+                for (const auto& queued : queuedCommands_) {
+                    if (queued.action == action) return;
+                }
+            }
             if (action == QStringLiteral("sprite.update") && !queuedCommands_.isEmpty() &&
                 queuedCommands_.last().action == action &&
                 queuedCommands_.last().params.value(QStringLiteral("index")) ==
@@ -609,6 +633,8 @@ private:
     QProcess process_;
     QTemporaryDir mailboxDir_;
     QTimer mailboxPoll_;
+    QTimer outputPoll_;
+    QByteArray outputBuffer_;
     QString pendingId_;
     QString pendingAction_;
     QQueue<Command> queuedCommands_;
