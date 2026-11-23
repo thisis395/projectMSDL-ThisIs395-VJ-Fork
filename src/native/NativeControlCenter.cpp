@@ -209,6 +209,7 @@ public:
                 pendingId_.clear();
                 pendingAction_.clear();
                 queuedCommands_.clear();
+                rendererReady_ = false;
                 spriteManager_->setConnected(false);
                 setRunning(false);
             }
@@ -220,6 +221,7 @@ public:
                     pendingId_.clear();
                     pendingAction_.clear();
                     queuedCommands_.clear();
+                    rendererReady_ = false;
                     spriteManager_->setConnected(false);
                     spriteManager_->setState(QJsonArray());
                     setRunning(false);
@@ -296,6 +298,9 @@ private:
         setRunning(true);
         spriteManager_->setConnected(false);
         spriteManager_->setState(QJsonArray());
+        rendererReady_ = false;
+        pendingId_.clear();
+        pendingAction_.clear();
         queuedCommands_.clear();
         handshakeRetries_ = 0;
         process_.start();
@@ -329,7 +334,8 @@ private:
             // PNG import should work even from a fresh Control Center launch.
             // Start the renderer and replay the sprite.add command after ping,
             // rather than presenting the user with a disabled/broken manager.
-            if (action == QStringLiteral("sprite.add")) {
+            if (action == QStringLiteral("sprite.add") ||
+                action == QStringLiteral("sprite.list")) {
                 if (process_.state() == QProcess::NotRunning)
                     launchVisualizer();
                 if (process_.state() != QProcess::NotRunning) {
@@ -350,9 +356,11 @@ private:
             return;
         }
 
-        // Only one command may occupy the mailbox. Queue controls rather than
-        // drop changes while a prior slider adjustment awaits acknowledgment.
-        if (!pendingId_.isEmpty()) {
+        // Until the renderer has answered ping, all UI commands except ping
+        // must remain queued. Otherwise they can preempt the handshake,
+        // leaving every native sprite control disabled.
+        if ((!rendererReady_ && action != QStringLiteral("ping")) ||
+            !pendingId_.isEmpty()) {
             if (action == QStringLiteral("sprite.update") && !queuedCommands_.isEmpty() &&
                 queuedCommands_.last().action == action &&
                 queuedCommands_.last().params.value(QStringLiteral("index")) ==
@@ -395,7 +403,7 @@ private:
 
     void sendNextQueuedCommand()
     {
-        if (pendingId_.isEmpty() && !queuedCommands_.isEmpty()) {
+        if (rendererReady_ && pendingId_.isEmpty() && !queuedCommands_.isEmpty()) {
             const Command next = queuedCommands_.dequeue();
             sendCommand(next.action, next.path, next.params);
         }
@@ -418,7 +426,10 @@ private:
                 const bool wasHandshake = pendingAction_ == QStringLiteral("ping");
                 pendingId_.clear();
                 pendingAction_.clear();
-                queuedCommands_.clear();
+                // Preserve queued PNG imports across startup ping retries.
+                // A timed-out transform has unknown state, so discard those.
+                if (!wasHandshake)
+                    queuedCommands_.clear();
                 QFile::remove(mailboxDir_.filePath(QStringLiteral("command.json")));
                 status_->setText(tr("Renderer did not respond within 5 seconds."));
                 if (wasSpriteCommand)
@@ -432,6 +443,7 @@ private:
                             sendCommand(QStringLiteral("ping"));
                     });
                 } else if (wasHandshake) {
+                    queuedCommands_.clear();
                     spriteManager_->setStatus(tr("Renderer did not complete the handshake. Open Visualizer output for details."));
                 }
             }
@@ -451,6 +463,7 @@ private:
         const bool ok = response.value(QStringLiteral("ok")).toBool();
         if (ok && action == QStringLiteral("ping")) {
             handshakeRetries_ = 0;
+            rendererReady_ = true;
             spriteManager_->setConnected(true);
         }
         if (ok && response.value(QStringLiteral("sprites")).isArray()) {
@@ -516,6 +529,7 @@ private:
     QQueue<Command> queuedCommands_;
     QElapsedTimer pendingElapsed_;
     bool sendHandshakeOnStart_ = false;
+    bool rendererReady_ = false;
     int handshakeRetries_ = 0;
     QLineEdit* executable_ = nullptr;
     QLineEdit* presetPath_ = nullptr;
