@@ -331,6 +331,24 @@ private:
                      const QJsonObject& params = QJsonObject())
     {
         if (process_.state() != QProcess::Running) {
+            // PNG import should work even from a fresh Control Center launch.
+            // Start the renderer and replay the sprite.add command after ping,
+            // rather than presenting the user with a disabled/broken manager.
+            if (action == QStringLiteral("sprite.add")) {
+                if (process_.state() == QProcess::NotRunning)
+                    launchVisualizer();
+                if (process_.state() != QProcess::NotRunning) {
+                    if (queuedCommands_.size() < 32) {
+                        queuedCommands_.enqueue({action, path, params});
+                        spriteManager_->setStatus(tr("PNG queued. Connecting to the visualizer..."));
+                    } else {
+                        spriteManager_->setStatus(tr("Sprite queue full; let the visualizer finish starting."));
+                    }
+                    return;
+                }
+                spriteManager_->setStatus(tr("Visualizer could not start. Check the Visualizer output."));
+                return;
+            }
             status_->setText(tr("Launch the visualizer before sending commands."));
             if (action.startsWith(QStringLiteral("sprite.")))
                 spriteManager_->setStatus(tr("Launch the visualizer first."));
