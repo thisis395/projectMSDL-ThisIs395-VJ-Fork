@@ -4,6 +4,8 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFrame>
+#include <QAbstractItemView>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
