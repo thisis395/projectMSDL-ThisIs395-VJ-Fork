@@ -55,6 +55,15 @@ jobs:
             libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0
           qmake6 -query QT_VERSION
           dpkg-query -W -f='Qt6 development package: ${Version}\n' qt6-base-dev
+      - name: Generate shared icon assets from original portrait
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python tools/generate_icons.py
+          # linuxdeploy requires this filename to match the desktop entry.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp src/resources/icons/icon_scalable.svg src/native/packaging/ThisIs395-VJ-ControlCenter.svg
+          fi
       - name: Configure standalone native Qt application
         shell: bash
         run: cmake -S src/native/standalone -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
