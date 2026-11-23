@@ -85,6 +85,7 @@ public:
         status_->setWordWrap(true);
         root->addWidget(status_);
         setConnected(false);
+        setStatus(tr("Launch the visualizer, then add a PNG. Live controls activate when the renderer responds."));
 
         connect(add_, &QPushButton::clicked, this, [this] {
             const QString path = QFileDialog::getOpenFileName(
@@ -117,6 +118,7 @@ public:
         add_->setEnabled(value);
         refresh_->setEnabled(value);
         updateSelectionEnabled();
+        if (!value) setStatus(tr("No live renderer connection. Launch the visualizer first."));
     }
 
     void setStatus(const QString& message) { status_->setText(message); }
@@ -126,6 +128,12 @@ public:
         if (auto* selected = list_->currentItem())
             previousPath = selected->data(Qt::UserRole).toString();
         const int previousRow = list_->currentRow();
+        // Do not clobber controls while their spinbox is being edited.
+        // Previously every acknowledgment rebuilt the list and reset
+        // user-entered numbers, making sliders look unresponsive.
+        const bool editing = std::any_of(
+            std::initializer_list<QDoubleSpinBox*>{x_, y_, scale_, opacity_, rotation_, gain_},
+            [](QDoubleSpinBox* spin) { return spin && spin->hasFocus(); });
         data_ = items;
         syncing_ = true;
         {
@@ -150,7 +158,9 @@ public:
             list_->setCurrentRow(target);
         }
         syncing_ = false;
-        loadSelection(list_->currentRow());
+        // Preserve the in-progress edit until focus leaves the spinbox.
+        if (!editing) loadSelection(list_->currentRow());
+        else updateSelectionEnabled();
         setStatus(tr("%1 / 16 live sprites.").arg(list_->count()));
     }
 
@@ -232,6 +242,7 @@ private:
 
     void applyChanges() {
         if (syncing_ || list_->currentRow() < 0 || !connected_) return;
+        setStatus(tr("Updating live sprite..."));
         dispatch(QStringLiteral("sprite.update"), {
             {QStringLiteral("index"), list_->currentRow()},
             {QStringLiteral("x"), x_->value()},
