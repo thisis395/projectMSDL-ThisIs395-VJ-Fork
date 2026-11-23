@@ -690,6 +690,10 @@ int main(int argc, char** argv)
             rendererArgs.push_back(argv[i]);
         const int rendererArgc = static_cast<int>(rendererArgs.size());
         rendererArgs.push_back(nullptr); // Preserve argv[argc] sentinel.
+        // Initialize Qt Core in renderer mode too: QImageReader needs a
+        // reliable application/plugin environment to decode imported PNGs,
+        // especially inside the deployed Windows/macOS app layout.
+        QCoreApplication imageRuntime(rendererArgc, rendererArgs.data());
         return RunProjectMRenderer(rendererArgc, rendererArgs.data());
     }
 #endif
