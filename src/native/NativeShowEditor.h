@@ -32,6 +32,7 @@
 class NativeShowEditor final : public QWidget {
 public:
     void setCueCallback(std::function<void(const QString&)> callback) { cueCallback_ = std::move(callback); }
+    void setSpriteCallback(std::function<void(const QString&)> callback) { spriteCallback_ = std::move(callback); }
 
     explicit NativeShowEditor(QWidget* parent = nullptr) : QWidget(parent) {
         auto* root = new QVBoxLayout(this);
@@ -66,6 +67,8 @@ public:
         auto* spriteActions = new QHBoxLayout;
         spriteActions->addWidget(addSprites);
         spriteActions->addWidget(spriteToSequence);
+        auto* loadLiveSprite = new QPushButton(tr("Load into live Sprite Manager"));
+        spriteActions->addWidget(loadLiveSprite);
         libLayout->addLayout(spriteActions);
         pages->addTab(library, tr("Playlist"));
 
@@ -167,6 +170,10 @@ public:
                 cueCallback_(presets_->currentItem()->text());
         });
         connect(spriteToSequence, &QPushButton::clicked, this, [this] { addClip(sprites_, true); });
+        connect(loadLiveSprite, &QPushButton::clicked, this, [this] {
+            if (sprites_->currentItem() && spriteCallback_)
+                spriteCallback_(sprites_->currentItem()->text());
+        });
         connect(clips_, &QListWidget::currentRowChanged, this, [this](int row) {
             if (row < 0 || row >= entries_.size()) return;
             editing_ = true;
@@ -202,6 +209,7 @@ private:
     };
     QVector<Clip> entries_;
     std::function<void(const QString&)> cueCallback_;
+    std::function<void(const QString&)> spriteCallback_;
     QListWidget* presets_ = nullptr;
     QListWidget* sprites_ = nullptr;
     QListWidget* clips_ = nullptr;
