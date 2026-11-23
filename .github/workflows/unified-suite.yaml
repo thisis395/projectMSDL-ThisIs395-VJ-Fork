@@ -133,7 +133,18 @@ jobs:
           deb=$(find cmake-build-frontend-sdl2 -maxdepth 1 -name '*.deb' -print -quit)
           test -n "$deb"
           dpkg-deb --contents "$deb" > deb-manifest.txt
-          grep -Eq '/usr/bin/ThisIs395-VJ
+          grep -Eq '/usr/bin/ThisIs395-VJ$' deb-manifest.txt
+          if grep -Eq '/usr/bin/projectMSDL$|/usr/bin/ThisIs395-VJ-ControlCenter$' deb-manifest.txt; then
+            echo "Package accidentally includes old standalone GUI executable"
+            exit 1
+          fi
+          echo "DEB provides one GUI executable and its auxiliary offline renderer."
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ThisIs395-VJ-suite-linux-x64
+          path: cmake-build-frontend-sdl2/*.deb
+          if-no-files-found: error
 
   build-windows:
     name: Windows, x64
