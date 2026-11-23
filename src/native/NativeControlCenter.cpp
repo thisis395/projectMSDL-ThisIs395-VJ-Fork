@@ -508,6 +508,8 @@ private:
 
         pendingId_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
         pendingAction_ = action;
+        pendingSpritePath_ = action == QStringLiteral("sprite.add")
+            ? params.value(QStringLiteral("path")).toString() : QString();
         pendingElapsed_.start();
         QJsonObject request{{QStringLiteral("version"), 1},
                             {QStringLiteral("id"), pendingId_},
@@ -554,6 +556,8 @@ private:
                 pendingElapsed_.elapsed() > 5000) {
                 const bool wasSpriteCommand = pendingAction_.startsWith(QStringLiteral("sprite."));
                 const bool wasHandshake = pendingAction_ == QStringLiteral("ping");
+                const QString failedSpritePath = pendingSpritePath_;
+                pendingSpritePath_.clear();
                 pendingId_.clear();
                 pendingAction_.clear();
                 // Preserve queued PNG imports across startup ping retries.
@@ -562,8 +566,12 @@ private:
                     queuedCommands_.clear();
                 QFile::remove(mailboxDir_.filePath(QStringLiteral("command.json")));
                 status_->setText(tr("Renderer did not respond within 5 seconds."));
-                if (wasSpriteCommand)
+                if (wasSpriteCommand) {
                     spriteManager_->setStatus(tr("Sprite command timed out. Check the visualizer log."));
+                    if (!failedSpritePath.isEmpty())
+                        spriteManager_->reportImportFailure(
+                            failedSpritePath, tr("No renderer response within five seconds"));
+                }
                 if (wasHandshake && handshakeRetries_++ < 3) {
                     spriteManager_->setStatus(tr("Waiting for renderer startup (retry %1/3)...").arg(handshakeRetries_));
                     // Delaying the next ping avoids hammering a renderer that
@@ -588,6 +596,8 @@ private:
             return;
 
         const QString action = pendingAction_;
+        const QString importPath = pendingSpritePath_;
+        pendingSpritePath_.clear();
         pendingId_.clear();
         pendingAction_.clear();
         const bool ok = response.value(QStringLiteral("ok")).toBool();
@@ -606,7 +616,9 @@ private:
         if (!ok) {
             const QString error = response.value(QStringLiteral("error")).toString();
             status_->setText(tr("Renderer rejected command: %1").arg(error));
-            if (action.startsWith(QStringLiteral("sprite.")))
+            if (action == QStringLiteral("sprite.add") && !importPath.isEmpty())
+                spriteManager_->reportImportFailure(importPath, error);
+            else if (action.startsWith(QStringLiteral("sprite.")))
                 spriteManager_->setStatus(error);
         } else {
             status_->setText(tr("Renderer connected. Preset #%1, shuffle: %2, locked: %3")
@@ -660,6 +672,7 @@ private:
     QByteArray outputBuffer_;
     QString pendingId_;
     QString pendingAction_;
+    QString pendingSpritePath_;
     QQueue<Command> queuedCommands_;
     QElapsedTimer pendingElapsed_;
     bool sendHandshakeOnStart_ = false;
