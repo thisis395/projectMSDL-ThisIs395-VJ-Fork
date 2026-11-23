@@ -42,7 +42,7 @@ void RenderLoop::Run()
         limiter.StartFrame();
 
         PollEvents();
-        mailbox.poll(_projectMHandle, _playlistHandle);
+        mailbox.poll(_projectMHandle, _playlistHandle, _projectMGui.ManagedSprites());
         CheckViewportSize();
         _audioCapture.FillBuffer();
         _projectMWrapper.RenderFrame();
