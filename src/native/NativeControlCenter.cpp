@@ -13,7 +13,6 @@
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDir>
-#include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -54,7 +53,8 @@ public:
         setWindowTitle(QStringLiteral("ThisIs395 VJ Control Center"));
         resize(1160, 700);
         setWindowIcon(QIcon(QStringLiteral(":/thisis395/portrait.png")));
-        auto* tabs = new QTabWidget(this);
+        tabs_ = new QTabWidget(this);
+        auto* tabs = tabs_;
         setCentralWidget(tabs);
 
         auto* visualizer = new QWidget;
@@ -157,27 +157,22 @@ public:
         auto* showEditor = new NativeShowEditor(tabs);
         showEditor->setCueCallback([this](const QString& path) { sendCommand(QStringLiteral("cue"), path); });
         showEditor->setSpriteCallback([this](const QString& path) {
-            if (spriteDock_) spriteDock_->show();
+            showSpriteManager();
             sendCommand(QStringLiteral("sprite.add"), QString(), {{QStringLiteral("path"), path}});
         });
         tabs->addTab(showEditor, tr("Show Editor"));
 
-        // Dock in the native control center or float into its own window.
-        spriteDock_ = new QDockWidget(tr("Sprite Manager"), this);
-        spriteManager_ = new NativeSpriteManager(spriteDock_);
+        // A single Sprite Manager lives in the Control Center. The SDL window
+        // is solely the visualizer. No duplicate floating sprite editors.
+        spriteManager_ = new NativeSpriteManager(tabs);
         spriteManager_->setDispatch([this](const QString& action, const QJsonObject& params) {
             sendCommand(action, QString(), params);
         });
-        spriteDock_->setWidget(spriteManager_);
-        spriteDock_->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-        spriteDock_->setFeatures(QDockWidget::DockWidgetMovable |
-                                 QDockWidget::DockWidgetFloatable |
-                                 QDockWidget::DockWidgetClosable);
-        addDockWidget(Qt::RightDockWidgetArea, spriteDock_);
-        spriteDock_->setMinimumWidth(340);
-        auto* openSprites = new QPushButton(tr("Pop out Sprite Manager"));
+        tabs->addTab(spriteManager_, tr("Sprite Manager"));
+
+        auto* openSprites = new QPushButton(tr("Sprite Manager"));
         controls->addWidget(openSprites);
-        connect(openSprites, &QPushButton::clicked, this, [this] { popOutSpriteManager(); });
+        connect(openSprites, &QPushButton::clicked, this, [this] { showSpriteManager(); });
 
         optionsWindow_ = new QWidget(nullptr, Qt::Window);
         optionsWindow_->setWindowTitle(tr("ThisIs395 VJ - Options"));
@@ -186,7 +181,7 @@ public:
                                               "Changes are saved locally when launching or closing the control center.")));
         auto* optionsSprites = new QPushButton(tr("Open native Sprite Manager"));
         optionsLayout->addWidget(optionsSprites);
-        connect(optionsSprites, &QPushButton::clicked, this, [this] { popOutSpriteManager(); });
+        connect(optionsSprites, &QPushButton::clicked, this, [this] { showSpriteManager(); });
         optionsWindow_->resize(430, 200);
         auto* optionsButton = new QPushButton(tr("Pop out options"));
         controls->addWidget(optionsButton);
@@ -309,15 +304,15 @@ private:
     }
 
 
-    void popOutSpriteManager()
+    void showSpriteManager()
     {
-        if (!spriteDock_) return;
-        spriteDock_->show();
-        spriteDock_->setFloating(true);
-        spriteDock_->resize(500, 750);
-        spriteDock_->raise();
-        spriteDock_->activateWindow();
-        if (spriteManager_ && process_.state() == QProcess::Running)
+        // Keep the manager embedded in the Control Center. It never becomes
+        // a second independent window and shares state with the renderer.
+        if (!tabs_ || !spriteManager_) return;
+        tabs_->setCurrentWidget(spriteManager_);
+        raise();
+        activateWindow();
+        if (rendererReady_)
             sendCommand(QStringLiteral("sprite.list"));
     }
 
@@ -533,7 +528,7 @@ private:
     QLabel* status_ = nullptr;
     QPlainTextEdit* output_ = nullptr;
     QWidget* optionsWindow_ = nullptr;
-    QDockWidget* spriteDock_ = nullptr;
+    QTabWidget* tabs_ = nullptr;
     NativeSpriteManager* spriteManager_ = nullptr;
 };
 
