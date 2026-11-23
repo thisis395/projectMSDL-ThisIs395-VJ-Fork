@@ -16,6 +16,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileDialog>
+#include <QMetaObject>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -279,7 +280,10 @@ public:
                 return;
             }
             dialog->selectFile(pngPath);
-            dialog->accept();
+            if (!QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection)) {
+                std::cerr << "FAIL: QFileDialog accept slot unavailable" << std::endl;
+                QCoreApplication::exit(1);
+            }
         });
         connect(timer, &QTimer::timeout, this, [this, timer, started, phase = 0]() mutable {
             const auto fail = [this](const char* why) {
