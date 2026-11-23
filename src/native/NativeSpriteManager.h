@@ -103,16 +103,8 @@ public:
             dialog->setFileMode(QFileDialog::ExistingFile);
             dialog->setNameFilter(tr("PNG images (*.png)"));
             dialog->setAttribute(Qt::WA_DeleteOnClose);
-            connect(dialog, &QFileDialog::fileSelected, this, [this](const QString& selected) {
-                if (selected.isEmpty()) return;
-                if (list_->count() >= 16) {
-                    setStatus(tr("Only 16 live sprites are supported."));
-                    return;
-                }
-                const QString path = QFileInfo(selected).absoluteFilePath();
-                setStatus(tr("Importing %1...").arg(QFileInfo(path).fileName()));
-                dispatch(QStringLiteral("sprite.add"), {{QStringLiteral("path"), path}});
-            });
+            connect(dialog, &QFileDialog::fileSelected, this,
+                    [this](const QString& selected) { importSpriteFile(selected); });
             dialog->open();
         });
         connect(remove_, &QPushButton::clicked, this, [this] {
@@ -130,6 +122,26 @@ public:
     }
 
     void setDispatch(Dispatch callback) { dispatch_ = std::move(callback); }
+
+    bool isConnected() const { return connected_; }
+    QJsonArray currentState() const { return data_; }
+
+    // Shared by the asynchronous file picker and GUI integration tests.
+    void importSpriteFile(const QString& selected) {
+        const QFileInfo file(selected);
+        if (!file.isFile() || !file.isReadable() ||
+            file.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0) {
+            setStatus(tr("Select an accessible PNG image."));
+            return;
+        }
+        if (list_->count() >= 16) {
+            setStatus(tr("Only 16 live sprites are supported."));
+            return;
+        }
+        const QString path = file.absoluteFilePath();
+        setStatus(tr("Importing %1...").arg(file.fileName()));
+        dispatch(QStringLiteral("sprite.add"), {{QStringLiteral("path"), path}});
+    }
 
     void setConnected(bool value) {
         connected_ = value;
