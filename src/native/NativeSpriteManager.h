@@ -86,7 +86,11 @@ public:
         status_->setWordWrap(true);
         root->addWidget(status_);
         setConnected(false);
-        setStatus(tr("Launch the visualizer, then add a PNG. Live controls activate when the renderer responds."));
+        add_->setToolTip(tr("Choose a PNG. The visualizer starts automatically if necessary."));
+        refresh_->setToolTip(tr("Refresh the live list and connect to the visualizer if necessary."));
+        remove_->setToolTip(tr("Select a loaded sprite before removing it."));
+        apply_->setToolTip(tr("Select a loaded sprite before applying scale, position and other changes."));
+        setStatus(tr("Add PNG starts the visualizer automatically. Select a loaded sprite to enable its controls."));
 
         connect(add_, &QPushButton::clicked, this, [this] {
             const QString path = QFileDialog::getOpenFileName(
@@ -119,7 +123,8 @@ public:
         // Importing a PNG is permitted before the renderer starts. The
         // parent will launch the visualizer and queue the pending import.
         add_->setEnabled(true);
-        refresh_->setEnabled(value);
+        // Refresh may also start the renderer when it is not running.
+        refresh_->setEnabled(true);
         updateSelectionEnabled();
         if (!value) setStatus(tr("No live renderer connection. Launch the visualizer first."));
     }
@@ -208,12 +213,15 @@ private:
             setStatus(tr("No renderer controller attached."));
             return;
         }
-        if (!connected_ && action != QStringLiteral("sprite.add")) {
+        if (!connected_ && action != QStringLiteral("sprite.add") &&
+            action != QStringLiteral("sprite.list")) {
             setStatus(tr("Start the visualizer before editing live sprites."));
             return;
         }
         if (!connected_)
-            setStatus(tr("Starting visualizer and queuing PNG import..."));
+            setStatus(action == QStringLiteral("sprite.add")
+                ? tr("Starting visualizer and queuing PNG import...")
+                : tr("Connecting to visualizer and refreshing sprites..."));
         dispatch_(action, params);
     }
 
