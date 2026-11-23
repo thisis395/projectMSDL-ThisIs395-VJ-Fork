@@ -25,3 +25,10 @@ else()
     ../NativeSpriteManager.h)
 endif()
 target_link_libraries(ThisIs395-VJ-ControlCenter PRIVATE Qt6::Widgets)
+# Keep standalone Qt CI using the same exact logo as the unified build.
+set(VJ_PORTRAIT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/../../../branding/portrait-original.png")
+set_source_files_properties("${VJ_PORTRAIT_ICON}" PROPERTIES
+    QT_RESOURCE_ALIAS "portrait.png")
+qt_add_resources(ThisIs395-VJ-ControlCenter "thisis395_portrait"
+    PREFIX "/thisis395" FILES "${VJ_PORTRAIT_ICON}")
+
