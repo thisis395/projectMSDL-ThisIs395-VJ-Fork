@@ -3,7 +3,7 @@
 # General packaging variables
 set(CPACK_PACKAGE_NAME "projectMSDL")
 if(ENABLE_VJ_SINGLE_BINARY)
-    set(CPACK_PACKAGE_NAME "ThisIs395-VJ")
+    set(CPACK_PACKAGE_NAME "thisis395-vj")
 endif()
 set(CPACK_PACKAGE_VENDOR "The projectM Development Team")
 set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/resources/package-description.txt")
