@@ -6,7 +6,8 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
 if(APPLE)
   add_executable(ThisIs395-VJ-ControlCenter MACOSX_BUNDLE
     ../NativeControlCenter.cpp
-    ../NativeShowEditor.h)
+    ../NativeShowEditor.h
+    ../NativeSpriteManager.h)
   set_target_properties(ThisIs395-VJ-ControlCenter PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "ThisIs395 VJ Control Center"
     MACOSX_BUNDLE_GUI_IDENTIFIER "net.thisis395.vj.controlcenter"
@@ -15,10 +16,12 @@ if(APPLE)
 elseif(WIN32)
   add_executable(ThisIs395-VJ-ControlCenter WIN32
     ../NativeControlCenter.cpp
-    ../NativeShowEditor.h)
+    ../NativeShowEditor.h
+    ../NativeSpriteManager.h)
 else()
   add_executable(ThisIs395-VJ-ControlCenter
     ../NativeControlCenter.cpp
-    ../NativeShowEditor.h)
+    ../NativeShowEditor.h
+    ../NativeSpriteManager.h)
 endif()
 target_link_libraries(ThisIs395-VJ-ControlCenter PRIVATE Qt6::Widgets)
