@@ -13,6 +13,8 @@
 #include <Poco/Util/Subsystem.h>
 
 #include <memory>
+#include <unordered_map>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -39,6 +41,12 @@ public:
 
     /** Add the directory containing a selected PNG to projectM's texture search paths. */
     void AddSpriteTextureDirectory(const std::string& directory);
+
+    // Pre-decode imported PNGs on the renderer thread, rather than depending
+    // on projectM's global texture search path and placeholder fallback.
+    bool PrepareSpriteTexture(const std::string& path, std::string& textureName, std::string& error);
+    bool SpriteTextureDelivered(const std::string& textureName) const;
+    void ReleaseSpriteTexture(const std::string& textureName);
 
     /**
      * Renders a single projectM frame.
@@ -117,6 +125,15 @@ private:
     Poco::AutoPtr<Poco::Util::AbstractConfiguration> _projectMConfigView; //!< View of the "projectM" configuration subkey in the "effective" configuration.
 
     std::vector<std::string> _textureSearchPaths;
+    struct SpriteTextureData
+    {
+        std::vector<unsigned char> rgba;
+        unsigned int width{0};
+        unsigned int height{0};
+        bool delivered{false};
+    };
+    std::unordered_map<std::string, SpriteTextureData> _spriteTextureData;
+    std::uint64_t _nextSpriteTextureId{0};
 
     projectm_handle _projectM{nullptr}; //!< Pointer to the projectM instance used by the application.
     projectm_playlist_handle _playlist{nullptr}; //!< Pointer to the projectM playlist manager instance.
