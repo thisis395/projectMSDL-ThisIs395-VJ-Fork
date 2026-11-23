@@ -1,7 +1,7 @@
 # Build check workflow
 # Used to check if projectMSDL compiles with upstream master of libprojectM.
 # The resulting binaries are not considered for public use though.
-name: Unified ThisIs395 VJ Suite
+name: Single-Executable ThisIs395 VJ
 
 on:
   push:
@@ -94,7 +94,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release  \
             "-DCMAKE_PREFIX_PATH=${GITHUB_WORKSPACE}/install-libprojectm;${GITHUB_WORKSPACE}/install-poco"  \
             "-DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install-frontend-sdl2" \
-            -DENABLE_QT_NATIVE_UI=ON
+            -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
           cmake --build cmake-build-frontend-sdl2 --parallel
 
       - name: Offline render driver syntax + FFmpeg smoke test
@@ -190,7 +190,7 @@ jobs:
       - name: Build projectMSDL
         run: |
           mkdir cmake-build-frontend-sdl2
-          cmake -G "Visual Studio 18 2026" -A "X64" -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static  -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-libprojectm" -DprojectM4_DIR="${{ github.workspace }}/install-libprojectm/lib/cmake/projectM4" -DprojectM4Playlist_DIR="${{ github.workspace }}/install-libprojectm/lib/cmake/projectM4Playlist" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" -DCMAKE_VERBOSE_MAKEFILE=YES -DSDL2_LINKAGE=static -DBUILD_TESTING=YES -DENABLE_QT_NATIVE_UI=ON
+          cmake -G "Visual Studio 18 2026" -A "X64" -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static  -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-libprojectm" -DprojectM4_DIR="${{ github.workspace }}/install-libprojectm/lib/cmake/projectM4" -DprojectM4Playlist_DIR="${{ github.workspace }}/install-libprojectm/lib/cmake/projectM4Playlist" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" -DCMAKE_VERBOSE_MAKEFILE=YES -DSDL2_LINKAGE=static -DBUILD_TESTING=YES -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
           cmake --build "${{ github.workspace }}/cmake-build-frontend-sdl2" --parallel --config Release
 
       - name: Package projectMSDL
@@ -204,14 +204,15 @@ jobs:
           $suite = Join-Path $env:GITHUB_WORKSPACE "ThisIs395-VJ-suite"
           cmake --install "cmake-build-frontend-sdl2" --config Release --prefix "$suite"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!(Test-Path "$suite/projectMSDL.exe")) { throw 'SDL renderer missing from unified package' }
-          if (!(Test-Path "$suite/ThisIs395-VJ-ControlCenter.exe")) { throw 'Native Qt editor missing from unified package' }
-          & (Get-Command windeployqt.exe -ErrorAction Stop).Source --release --no-translations --no-compiler-runtime "$suite/ThisIs395-VJ-ControlCenter.exe"
+          if (!(Test-Path "$suite/ThisIs395-VJ.exe")) { throw 'Unified VJ executable missing from package' }
+          if (Test-Path "$suite/projectMSDL.exe") { throw 'Separate SDL renderer accidentally packaged' }
+          if (Test-Path "$suite/ThisIs395-VJ-ControlCenter.exe") { throw 'Separate Qt controller accidentally packaged' }
+          & (Get-Command windeployqt.exe -ErrorAction Stop).Source --release --no-translations --no-compiler-runtime "$suite/ThisIs395-VJ.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path "$suite/platforms/qwindows.dll")) { throw 'Qt platform plugin missing' }
-          "Start ThisIs395-VJ-ControlCenter.exe to launch the native UI; projectMSDL.exe is installed alongside it." | Set-Content "$suite/README.txt"
-          # Verify the final directory itself, not just the compiler output.
-          foreach ($required in @("projectMSDL.exe", "ThisIs395-VJ-ControlCenter.exe", "projectMSDL-offline.exe", "platforms/qwindows.dll")) {
+          "Run ThisIs395-VJ.exe. It opens the native control center and can pop out the SDL visualizer using --vj-renderer internally." | Set-Content "$suite/README.txt"
+          # Verify one primary executable, plus the offline video renderer helper.
+          foreach ($required in @("ThisIs395-VJ.exe", "projectMSDL-offline.exe", "platforms/qwindows.dll")) {
             $full = Join-Path $suite $required
             if (!(Test-Path -LiteralPath $full -PathType Leaf)) { throw "Unified suite missing: $required" }
           }
@@ -266,7 +267,7 @@ jobs:
       - name: Build projectMSDL
         run: |
           mkdir cmake-build-frontend-sdl2
-          cmake -G Ninja -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=${{ github.workspace }}/install-libprojectm;$(brew --prefix qt)" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DENABLE_QT_NATIVE_UI=ON
+          cmake -G Ninja -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=${{ github.workspace }}/install-libprojectm;$(brew --prefix qt)" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
           cmake --build "${{ github.workspace }}/cmake-build-frontend-sdl2" --parallel
 
       - name: Package projectMSDL
@@ -280,9 +281,11 @@ jobs:
           cmake --install cmake-build-frontend-sdl2 --prefix "$GITHUB_WORKSPACE/ThisIs395-VJ-suite"
           APP="$GITHUB_WORKSPACE/ThisIs395-VJ-suite/projectM.app"
           test -x "$APP/Contents/MacOS/projectM"
-          test -x "$APP/Contents/MacOS/ThisIs395-VJ-ControlCenter"
-          "$(brew --prefix qt)/bin/macdeployqt" "$APP" -executable="$APP/Contents/MacOS/ThisIs395-VJ-ControlCenter" -always-overwrite
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable ThisIs395-VJ-ControlCenter' "$APP/Contents/Info.plist"
+          test ! -e "$APP/Contents/MacOS/ThisIs395-VJ-ControlCenter"
+          # The Qt entrypoint and SDL renderer are now the same Mach-O file.
+          "$(brew --prefix qt)/bin/macdeployqt" "$APP" -always-overwrite
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable projectM' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleName ThisIs395 VJ' "$APP/Contents/Info.plist"
           (cd "$GITHUB_WORKSPACE/ThisIs395-VJ-suite" && tar -czf "$GITHUB_WORKSPACE/ThisIs395-VJ-suite-macos-intel.tar.gz" projectM.app)
 
       - name: Upload unified macOS suite
