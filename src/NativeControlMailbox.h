@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <exception>
 #include <fstream>
+#include <iostream>
 #include <utility>
 #include <sstream>
 #include <string>
@@ -44,7 +45,8 @@ public:
             if (command.getSize() > 8192)
                 throw Poco::InvalidArgumentException("Command too large");
             std::ifstream stream(input.toString(), std::ios::binary);
-            if (!stream) return;
+            if (!stream)
+                throw Poco::OpenFileException("Cannot read native command mailbox");
             std::ostringstream content;
             content << stream.rdbuf();
             Poco::JSON::Parser parser;
@@ -158,15 +160,29 @@ public:
             Poco::Path temp(directory_);
             temp.append("response.tmp");
             std::ofstream stream(temp.toString(), std::ios::binary | std::ios::trunc);
-            if (!stream) return;
+            if (!stream) {
+                std::cerr << "Native control mailbox: cannot open reply temp file: "
+                          << temp.toString() << std::endl;
+                return;
+            }
             Poco::JSON::Stringifier::stringify(reply, stream);
             stream.close();
-            if (!stream) return;
+            if (!stream) {
+                std::cerr << "Native control mailbox: failed writing reply: "
+                          << temp.toString() << std::endl;
+                return;
+            }
             Poco::File target(output);
             if (target.exists()) target.remove();
             Poco::File(temp).renameTo(output.toString());
-        } catch (const Poco::Exception&) {
-            // Keep rendering even if mailbox storage becomes unavailable.
+        } catch (const Poco::Exception& ex) {
+            // Never bring down OpenGL rendering because the IPC directory
+            // was busy, deleted or inaccessible. Log to Qt's output pane.
+            std::cerr << "Native control mailbox response error: "
+                      << ex.displayText() << std::endl;
+        } catch (const std::exception& ex) {
+            std::cerr << "Native control mailbox unexpected error: "
+                      << ex.what() << std::endl;
         }
     }
 private:
