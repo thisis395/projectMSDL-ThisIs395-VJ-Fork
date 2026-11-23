@@ -123,6 +123,10 @@ public:
 
         auto* showEditor = new NativeShowEditor(tabs);
         showEditor->setCueCallback([this](const QString& path) { sendCommand(QStringLiteral("cue"), path); });
+        showEditor->setSpriteCallback([this](const QString& path) {
+            if (spriteDock_) spriteDock_->show();
+            sendCommand(QStringLiteral("sprite.add"), QString(), {{QStringLiteral("path"), path}});
+        });
         tabs->addTab(showEditor, tr("Show Editor"));
 
         // Dock in the native control center or float into its own window.
