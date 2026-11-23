@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QListWidget>
+#include <QLineEdit>
 #include <QPushButton>
 
 #include <cmath>
@@ -67,7 +68,25 @@ int main(int argc, char* argv[])
 
     auto spins = manager.findChildren<QDoubleSpinBox*>();
     require(spins.size() == 6, "Native scale / position / opacity / gain controls absent");
+    // Regression: the previous implementation cleared and rebuilt the
+    // entire list after each renderer ack, overwriting active text fields.
+    require(!spins[2]->keyboardTracking(),
+            "Scale input must not rewrite partial keystrokes from slider feedback");
+    auto* firstItem = list->item(0);
     spins[2]->setValue(0.6); // scale is the third numeric control
+    auto* edit = spins[2]->findChild<QLineEdit*>();
+    require(edit != nullptr, "Scale text editor unavailable");
+    edit->setText(QStringLiteral("1.234"));
+    for (int i = 0; i < 40; ++i) {
+        auto duplicate = sample;
+        duplicate.insert(QStringLiteral("scale"), 0.25 + i / 1000.0);
+        manager.setState(QJsonArray{duplicate});
+        require(list->item(0) == firstItem,
+                "Incoming sprite state unnecessarily rebuilt the entire list");
+        require(edit->text() == QStringLiteral("1.234"),
+                "Incoming state destroyed partially typed numeric input");
+    }
+    spins[2]->setValue(0.6);
     apply->click();
     require(!requests.empty() && requests.back().action == QStringLiteral("sprite.update"),
             "Apply button did not dispatch sprite.update");
@@ -85,6 +104,6 @@ int main(int argc, char* argv[])
     manager.setConnected(false);
     require(add->isEnabled() && refresh->isEnabled(),
             "Offline state should still allow importing and refreshing");
-    std::cout << "PASS: native sprite control buttons, selection and scale dispatch\n";
+    std::cout << "PASS: native sprite buttons, 40 repeated snapshots, typing preservation and scale dispatch\n";
     return 0;
 }
