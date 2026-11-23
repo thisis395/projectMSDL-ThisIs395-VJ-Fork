@@ -162,7 +162,10 @@ public:
         showEditor->setCueCallback([this](const QString& path) { sendCommand(QStringLiteral("cue"), path); });
         showEditor->setSpriteCallback([this](const QString& path) {
             showSpriteManager();
-            sendCommand(QStringLiteral("sprite.add"), QString(), {{QStringLiteral("path"), path}});
+            // Show Editor and Sprite Manager must go through the same import
+            // logic, so the PNG appears in the library even if the renderer
+            // cannot load it and the error stays visible to the user.
+            spriteManager_->importSpriteFile(path);
         });
         tabs->addTab(showEditor, tr("Show Editor"));
 
