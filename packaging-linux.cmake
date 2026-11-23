@@ -2,9 +2,12 @@
 
 # General packaging variables
 set(CPACK_PACKAGE_NAME "projectMSDL")
+if(ENABLE_VJ_SINGLE_BINARY)
+    set(CPACK_PACKAGE_NAME "ThisIs395-VJ")
+endif()
 set(CPACK_PACKAGE_VENDOR "The projectM Development Team")
 set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/resources/package-description.txt")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A standalone, Milkdrop-like audio visualization application")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "ThisIs395 VJ native control center with pop-out projectM visualizer")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://projectm-visualizer.org/")
 set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/resources/icons/icon_32x32.png")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/src/resources/gpl-3.0.txt")
