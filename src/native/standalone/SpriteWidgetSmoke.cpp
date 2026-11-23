@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QFileDialog>
 #include <QImage>
+#include <QColor>
 #include <QTemporaryDir>
 #include <QFileInfo>
 #include <QListWidget>
