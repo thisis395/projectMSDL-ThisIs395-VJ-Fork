@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QFileDialog>
+#include <QMetaObject>
 #include <QImage>
 #include <QColor>
 #include <QTemporaryDir>
@@ -66,7 +67,8 @@ int main(int argc, char* argv[])
         QStringLiteral("sprite-file-picker"));
     require(picker != nullptr, "Add PNG button did not open a QFileDialog");
     picker->selectFile(pngPath);
-    picker->accept();
+    require(QMetaObject::invokeMethod(picker, "accept", Qt::DirectConnection),
+            "QFileDialog accept slot unavailable");
     require(!requests.empty() && requests.back().action == QStringLiteral("sprite.add"),
             "Choosing a PNG did not dispatch sprite.add");
     require(requests.back().args.value(QStringLiteral("path")).toString() == pngPath,
