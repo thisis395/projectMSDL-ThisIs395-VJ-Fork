@@ -85,8 +85,16 @@ public:
             } else if (action == "sprite.list") {
                 // Return all renderer-owned sprites below.
             } else if (action == "sprite.add") {
-                if (!sprites.AddFile(request->getValue<std::string>("path")))
+                if (!sprites.AddFile(request->getValue<std::string>("path"))) {
+                    std::cerr << "Sprite import rejected: " << sprites.Status() << std::endl;
                     throw Poco::InvalidArgumentException(sprites.Status());
+                }
+                // A sprite list entry alone doesn't prove libprojectM is
+                // rendering it. Validate the engine's active sprite count.
+                if (projectm_sprite_get_sprite_count(renderer) == 0)
+                    throw Poco::InvalidArgumentException("PNG registered but projectM has no active sprites");
+                std::cerr << "Sprite PNG uploaded successfully; active renderer sprites: "
+                          << projectm_sprite_get_sprite_count(renderer) << std::endl;
             } else if (action == "sprite.remove") {
                 const int index = request->getValue<int>("index");
                 if (index < 0 || !sprites.RemoveManagedSprite(static_cast<std::size_t>(index)))
@@ -140,10 +148,12 @@ public:
                 reply->set("sprites", live);
             }
             reply->set("ok", true);
+            reply->set("activeSpriteCount", static_cast<int>(projectm_sprite_get_sprite_count(renderer)));
             reply->set("shuffle", projectm_playlist_get_shuffle(playlist));
             reply->set("locked", projectm_get_preset_locked(renderer));
             reply->set("presetIndex", static_cast<int>(projectm_playlist_get_position(playlist)));
         } catch (const Poco::Exception& e) {
+            std::cerr << "Sprite/native command failed: " << e.displayText() << std::endl;
             reply->set("id", id);
             reply->set("ok", false);
             reply->set("error", e.displayText());
