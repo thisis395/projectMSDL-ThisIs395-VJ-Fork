@@ -160,3 +160,62 @@ initial \`ping\` handshake succeeds.
   a new handshake.
 - Test the **unified** Windows/macOS/Linux artifacts, not only the
   standalone Qt-only binary.
+
+
+## Single-executable VJ integration (new, opt-in)
+
+For production-style packaging use:
+
+\`\`\`sh
+cmake -S . -B build -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
+cmake --build build --config Release
+cmake --install build --config Release
+\`\`\`
+
+The native Qt control center and the existing SDL/projectM renderer code
+compile into **one main executable**:
+- Windows: \`ThisIs395-VJ.exe\`
+- Linux: \`ThisIs395-VJ\`
+- macOS: \`projectM.app\` with one \`Contents/MacOS/projectM\` entrypoint
+
+Opening that application runs the Qt control center. Clicking **Pop out
+visualizer** launches **the same executable** in an internal
+\`--vj-renderer\` child mode. The child owns the SDL/OpenGL visualization
+window; Qt remains responsive in the main process. **Show / focus visualizer**
+and **Hide visualizer** use the existing local command mailbox to control
+the pop-out window. **Close visualizer** ends only the renderer child.
+The window can be popped out again while keeping the control center open.
+
+This is one installed **application file**, with two coordinated operating
+system **processes** while the visualizer runs. It is not one single process
+containing embedded SDL OpenGL and Qt graphics contexts. The two-process
+model is intentional for compatibility and independent window lifecycle.
+
+The legacy standalone \`projectMSDL\` target remains buildable for
+regression testing and for users disabling Qt, but it is **not installed**
+when \`ENABLE_VJ_SINGLE_BINARY=ON\`. The optional
+\`projectMSDL-offline\` CLI utility remains an auxiliary render helper.
+
+### Artwork
+
+\`branding/portrait-original.png\` contains the **exact original user-uploaded
+black-and-white portrait** (500 × 500, transparent outside the circle).
+No AI-generated substitute and no recoloring.
+
+\`tools/generate_icons.py\` creates Windows .ico, macOS .icns, PNG sizes and
+Linux SVG from that file. Qt embeds the original PNG in its compiled resources,
+and the renderer pop-out sets the same PNG as its SDL window icon. The user
+interface itself uses dark colors and green accents; the portrait remains
+monochrome.
+
+### CI and testing
+
+\`.github/workflows/unified-suite.yaml\` now uses the single-executable
+CMake option, and checks that the Windows package contains
+\`ThisIs395-VJ.exe\` with no separate SDL or Qt primary executable. macOS
+ships a single \`projectM.app\` with Qt as its entrypoint, and Linux ships a
+native DEB with one desktop launcher.
+
+The new option has not yet passed all platform builds or physical GPU
+runtime verification. Keep the PR in draft until verified; do not reuse old
+two-binary suite artifacts as evidence of a successful one-binary build.
