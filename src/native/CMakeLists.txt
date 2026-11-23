@@ -101,8 +101,13 @@ else()
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ENABLE_FLAT_PACKAGE)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/ThisIs395-VJ-ControlCenter.desktop"
-        DESTINATION "${PROJECTMSDL_DESKTOP_DIR}" COMPONENT projectMSDL)
+    if(ENABLE_VJ_SINGLE_BINARY)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/ThisIs395-VJ.desktop"
+            DESTINATION "${PROJECTMSDL_DESKTOP_DIR}" COMPONENT projectMSDL)
+    else()
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/ThisIs395-VJ-ControlCenter.desktop"
+            DESTINATION "${PROJECTMSDL_DESKTOP_DIR}" COMPONENT projectMSDL)
+    endif()
     install(FILES "${CMAKE_SOURCE_DIR}/src/resources/icons/icon_scalable.svg"
         DESTINATION "${PROJECTMSDL_ICONS_DIR}/scalable/apps"
         RENAME "ThisIs395-VJ-ControlCenter.svg" COMPONENT projectMSDL)
