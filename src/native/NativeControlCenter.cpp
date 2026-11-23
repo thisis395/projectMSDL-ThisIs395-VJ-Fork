@@ -512,7 +512,9 @@ int main(int argc, char** argv)
         rendererArgs.push_back(argv[0]);
         for (int i = 2; i < argc; ++i)
             rendererArgs.push_back(argv[i]);
-        return RunProjectMRenderer(static_cast<int>(rendererArgs.size()), rendererArgs.data());
+        const int rendererArgc = static_cast<int>(rendererArgs.size());
+        rendererArgs.push_back(nullptr); // Preserve argv[argc] sentinel.
+        return RunProjectMRenderer(rendererArgc, rendererArgs.data());
     }
 #endif
     QApplication app(argc, argv);
