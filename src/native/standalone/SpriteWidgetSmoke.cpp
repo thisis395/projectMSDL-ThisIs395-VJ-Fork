@@ -94,7 +94,7 @@ int main(int argc, char* argv[])
         {QStringLiteral("audioBand"), 1}};
     manager.setState(QJsonArray{sample});
 
-    auto* list = manager.findChild<QListWidget*>();
+    auto* list = manager.findChild<QListWidget*>(QStringLiteral("sprite-live-list"));
     require(list && list->count() == 1 && list->currentRow() == 0,
             "Live response did not select loaded sprite");
     require(remove->isEnabled() && apply->isEnabled(),
