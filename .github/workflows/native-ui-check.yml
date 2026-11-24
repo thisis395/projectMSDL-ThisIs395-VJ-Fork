@@ -1,4 +1,4 @@
-name: Qt6 Native UI Packages
+name: Qt6 Native Widget Tests (non-distributable)
 
 on:
   push:
@@ -73,49 +73,8 @@ jobs:
       - name: Exercise native Sprite Manager buttons
         shell: bash
         run: ctest --test-dir build/native --output-on-failure
-      - name: Bundle Windows Qt DLLs and platform plugins
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist/ThisIs395-VJ-ControlCenter | Out-Null
-          Copy-Item build/native/ThisIs395-VJ-ControlCenter.exe dist/ThisIs395-VJ-ControlCenter/
-          $qt = (Get-Command windeployqt.exe -ErrorAction Stop).Source
-          & $qt --release --no-translations --no-compiler-runtime dist/ThisIs395-VJ-ControlCenter/ThisIs395-VJ-ControlCenter.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!(Test-Path dist/ThisIs395-VJ-ControlCenter/platforms/qwindows.dll)) { throw 'Missing Qt Windows platform plugin' }
-      - name: Bundle macOS Qt frameworks
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp -R build/native/ThisIs395-VJ-ControlCenter.app dist/
-          macdeployqt dist/ThisIs395-VJ-ControlCenter.app -always-overwrite
-          test -x dist/ThisIs395-VJ-ControlCenter.app/Contents/MacOS/ThisIs395-VJ-ControlCenter
-          test -d dist/ThisIs395-VJ-ControlCenter.app/Contents/Frameworks
-      - name: Package Linux Qt libraries and plugins into AppImage
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          mkdir -p dist tools-bin
-          curl -fL --retry 3 -o tools-bin/linuxdeploy-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -fL --retry 3 -o tools-bin/linuxdeploy-plugin-qt-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          chmod +x tools-bin/*.AppImage
-          export PATH="$PWD/tools-bin:$PATH"
-          export QMAKE="$(command -v qmake6 || command -v qmake)"
-          test -n "$QMAKE"
-          export OUTPUT="$PWD/dist/ThisIs395-VJ-ControlCenter-linux-x64.AppImage"
-          ARCH=x86_64 tools-bin/linuxdeploy-x86_64.AppImage --appdir AppDir \
-            --executable build/native/ThisIs395-VJ-ControlCenter \
-            --desktop-file src/native/packaging/ThisIs395-VJ-ControlCenter.desktop \
-            --icon-file src/native/packaging/ThisIs395-VJ-ControlCenter.svg \
-            --plugin qt --output appimage
-          test -s "$OUTPUT"
-      - name: Upload downloadable native UI package
-        uses: actions/upload-artifact@v4
-        with:
-          name: ThisIs395-VJ-NativeUI-${{ matrix.os_tag }}
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 30
+      # The standalone Qt target is only an isolated regression-test harness.
+      # It cannot load or render projectM sprites by itself. Do not upload it
+      # as a user-facing app: use unified-suite.yaml for release ZIPs.
+      - name: Confirm test-only build
+        run: echo "Qt widget tests passed; full unified app packages are built by unified-suite."
