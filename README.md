@@ -18,6 +18,16 @@ Development builds: [GitHub Actions](https://github.com/thisis395/projectMSDL-Th
 
 Technical documentation: [Native control center](docs/ThisIs395_Qt_Native_UI.md).
 
+## Developer Disclosure
+
+Development and hands-on testing of the native UI were conducted on Windows 11 26H2, using what the developer considers the shittiest Razer known to mankind.
+
+The developer reserves and exercises his sole and inalienable right to use a Mac 99% of the time. Unfortunately, circumstances involving a raccoon temporarily prevented the exercise of said right.
+
+As a result, Windows was used not out of preference, but out of necessity. The Razer was an unwilling participant. The raccoon has declined to comment.
+
+The use of Windows during development does not constitute an endorsement of Windows.
+
 ## Development Philosophy
 
 - If it compiles, it might work.
