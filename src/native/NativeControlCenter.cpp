@@ -17,6 +17,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileDialog>
+#include <QDialogButtonBox>
 #include <QMetaObject>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -267,8 +268,9 @@ public:
         QElapsedTimer started;
         started.start();
         auto* timer = new QTimer(this);
-        // Exercise the real Add PNG button and QFileDialog::fileSelected
-        // signal, not just the importSpriteFile helper used by earlier tests.
+        // Make the actual Sprite Manager tab visible before exercising its
+        // real file dialog; do not bypass the user-facing import path.
+        showSpriteManager();
         auto* add = spriteManager_->findChild<QPushButton*>(QStringLiteral("sprite-add"));
         if (!add || !add->isEnabled()) {
             std::cerr << "FAIL: Add PNG button missing/disabled" << std::endl;
@@ -291,25 +293,61 @@ public:
                 QCoreApplication::exit(1);
                 return;
             }
-            // QFileSystemModel populates asynchronously. Select the basename
-            // only after navigating to its directory, then exercise accept.
             dialog->setDirectory(png.absolutePath());
-            QTimer::singleShot(500, dialog, [dialog, png] {
-                dialog->selectFile(png.fileName());
-                if (!QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection)) {
-                    std::cerr << "FAIL: QFileDialog accept slot unavailable" << std::endl;
+            auto* name = dialog->findChild<QLineEdit*>(QStringLiteral("fileNameEdit"));
+            auto* buttons = dialog->findChild<QDialogButtonBox*>();
+            auto* open = buttons ? buttons->button(QDialogButtonBox::Open) : nullptr;
+            if (!name || !open) {
+                std::cerr << "FAIL: PNG picker filename field or Open button missing" << std::endl;
+                QCoreApplication::exit(1);
+                return;
+            }
+            // Exercise the same text field and Open button as a real user.
+            // QFileSystemModel is asynchronous: wait for a valid selection,
+            // not a fixed sleep followed by a potentially ignored accept().
+            auto* pickerPoll = new QTimer(dialog);
+            connect(pickerPoll, &QTimer::timeout, dialog,
+                    [dialog, name, open, png, pickerPoll, attempts = 0]() mutable {
+                if (++attempts > 50) {
+                    pickerPoll->stop();
+                    std::cerr << "FAIL: PNG picker never enabled Open for "
+                              << png.absoluteFilePath().toStdString() << std::endl;
                     QCoreApplication::exit(1);
+                    return;
                 }
+                if (name->text() != png.absoluteFilePath())
+                    name->setText(png.absoluteFilePath());
+                const auto selected = dialog->selectedFiles();
+                if (!open->isEnabled() || selected.isEmpty() ||
+                    QFileInfo(selected.first()).absoluteFilePath() != png.absoluteFilePath())
+                    return;
+                pickerPoll->stop();
+                open->click();
             });
+            pickerPoll->start(100);
         });
         connect(timer, &QTimer::timeout, this, [this, timer, started, phase = 0]() mutable {
             const auto fail = [this](const char* why) {
                 std::cerr << "FAIL: Qt-to-renderer Sprite Manager smoke: " << why
                           << "\nVisualizer: " << status_->text().toStdString()
-                          << "\nOutput tail: " << output_->toPlainText().right(4000).toStdString()
+                          << "\nSprite Manager: " << spriteManager_->statusText().toStdString()
+                          << "\nProcess state: " << int(process_.state())
+                          << "\nLast reply: " << lastReplyAction_.toStdString()
+                          << "\nPending: " << pendingAction_.toStdString()
+                          << "\nQueued commands: " << queuedCommands_.size()
+                          << "\nOutput tail: " << (output_->toPlainText() +
+                              QString::fromLocal8Bit(outputBuffer_)).right(4000).toStdString()
                           << std::endl;
                 QCoreApplication::exit(1);
             };
+            if (phase == 0 && started.elapsed() > 8000) {
+                auto* library = spriteManager_->findChild<QListWidget*>(
+                    QStringLiteral("sprite-import-library"));
+                if (!library || library->count() == 0) {
+                    fail("File picker never committed PNG to the import library");
+                    return;
+                }
+            }
             if (started.elapsed() > 55000) {
                 fail("Control Center did not complete live sprite workflow within 55 seconds");
                 return;

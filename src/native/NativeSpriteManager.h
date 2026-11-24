@@ -118,16 +118,21 @@ public:
             // Non-blocking dialog: do not nest a modal Qt event loop while
             // command acknowledgments and the SDL renderer are active.
             auto* dialog = new QFileDialog(this, tr("Add transparent PNG sprite"));
+            // Qt requires this option before other dialog properties are set.
+            // Keep the picker in the Qt event loop on every platform.
+            dialog->setOption(QFileDialog::DontUseNativeDialog, true);
+            dialog->setAcceptMode(QFileDialog::AcceptOpen);
             dialog->setFileMode(QFileDialog::ExistingFile);
             dialog->setNameFilter(tr("PNG images (*.png)"));
-            // The native Windows file picker can outlive a temporary Qt
-            // widget and its callbacks. Keep selection inside the Qt event
-            // loop and make the same path testable on every platform.
-            dialog->setOption(QFileDialog::DontUseNativeDialog, true);
             dialog->setObjectName(QStringLiteral("sprite-file-picker"));
             dialog->setAttribute(Qt::WA_DeleteOnClose);
-            connect(dialog, &QFileDialog::fileSelected, this,
-                    [this](const QString& selected) { importSpriteFile(selected); });
+            // Read the committed selection at acceptance, rather than relying
+            // on the timing of an individual fileSelected signal.
+            connect(dialog, &QDialog::accepted, this, [this, dialog] {
+                const auto selected = dialog->selectedFiles();
+                if (!selected.isEmpty()) importSpriteFile(selected.first());
+                else setStatus(tr("No PNG was selected."));
+            });
             dialog->open();
         });
         connect(remove_, &QPushButton::clicked, this, [this] {
@@ -201,6 +206,7 @@ public:
     }
 
     void setStatus(const QString& message) { status_->setText(message); }
+    QString statusText() const { return status_->text(); }
 
     void reportImportFailure(const QString& path, const QString& error) {
         for (int i = 0; i < library_->count(); ++i) {
@@ -239,8 +245,12 @@ public:
                     break;
                 }
             }
-            candidate->setText((active ? tr("Live: %1") : tr("Not live: %1"))
-                .arg(QFileInfo(libraryPath).fileName()));
+            // A ping or unrelated snapshot must not erase a queued import
+            // or its failure state. Only previously live entries become inactive.
+            if (active)
+                candidate->setText(tr("Live: %1").arg(QFileInfo(libraryPath).fileName()));
+            else if (candidate->text().startsWith(tr("Live: %1").arg(QString())))
+                candidate->setText(tr("Not live: %1").arg(QFileInfo(libraryPath).fileName()));
         }
         if (pathsChanged) {
             const QString previousPath = list_->currentItem()

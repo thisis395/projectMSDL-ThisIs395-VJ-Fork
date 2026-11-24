@@ -61,6 +61,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: projectM-visualizer/projectm
+          # Known 4.2.0 revision with the texture-load callback API.
+          ref: 9e26f5b5bf89b015f197a16a61bcb21f4946d985
           path: projectm
           submodules: recursive
 
@@ -206,6 +208,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: projectM-visualizer/projectm
+          # Known 4.2.0 revision with the texture-load callback API.
+          ref: 9e26f5b5bf89b015f197a16a61bcb21f4946d985
           path: projectm
           submodules: recursive
 
@@ -239,10 +243,30 @@ jobs:
           arch: win64_msvc2022_64
           cache: true
 
+      - name: Use only the explicitly built projectM SDK
+        shell: pwsh
+        run: |
+          # The legacy manifest includes projectM 4.1.x for standalone releases.
+          # This job links the upstream 4.2.0 SDK instead. Installing both puts
+          # old headers ahead of the new library in MSVC's include search order.
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'frontend-sdl2/vcpkg.json'
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest.dependencies = @($manifest.dependencies | Where-Object {
+            if ($_ -is [string]) { $_ -ne 'projectm' } else { $_.name -ne 'projectm' }
+          })
+          $manifest | ConvertTo-Json -Depth 20 | Set-Content $manifestPath -Encoding utf8
+          $header = Join-Path $env:GITHUB_WORKSPACE 'install-libprojectm/include/projectM-4/callbacks.h'
+          if (-not (Select-String -Path $header -Pattern 'projectm_set_texture_load_event_callback' -Quiet)) {
+            throw 'The selected projectM SDK does not provide the required texture callback'
+          }
+
       - name: Build projectMSDL
         run: |
           mkdir cmake-build-frontend-sdl2
           cmake -G "Visual Studio 18 2026" -A "X64" -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static  -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-libprojectm" -DprojectM4_DIR="${{ github.workspace }}/install-libprojectm/lib/cmake/projectM4" -DprojectM4Playlist_DIR="${{ github.workspace }}/install-libprojectm/lib/cmake/projectM4Playlist" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" -DCMAKE_VERBOSE_MAKEFILE=YES -DSDL2_LINKAGE=static -DBUILD_TESTING=YES -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
+          if (Test-Path "${{ github.workspace }}/cmake-build-frontend-sdl2/vcpkg_installed/x64-windows-static/include/projectM-4/callbacks.h") {
+            throw 'Duplicate projectM headers found in vcpkg; refusing a mixed SDK build'
+          }
           cmake --build "${{ github.workspace }}/cmake-build-frontend-sdl2" --parallel --config Release
 
       - name: Package projectMSDL
@@ -290,6 +314,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: projectM-visualizer/projectm
+          # Known 4.2.0 revision with the texture-load callback API.
+          ref: 9e26f5b5bf89b015f197a16a61bcb21f4946d985
           path: projectm
           submodules: recursive
 
