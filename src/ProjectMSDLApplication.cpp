@@ -71,7 +71,22 @@ void ProjectMSDLApplication::initialize(Poco::Util::Application& self)
 
     try
     {
-        if (loadConfiguration(PRIO_DEFAULT) == 0)
+        // The unified executable has a different basename from the shipped
+        // configuration. Explicitly try the canonical file beside the binary
+        // if POCO's executable-name discovery did not load a configuration.
+        bool loadedDefaults = loadConfiguration(PRIO_DEFAULT) != 0;
+        if (!loadedDefaults)
+        {
+            Poco::Path installedConfig(config().getString("application.dir"));
+            installedConfig.makeDirectory().setFileName(configFileName);
+            if (Poco::File(installedConfig).exists())
+            {
+                loadConfiguration(installedConfig.toString(), PRIO_DEFAULT);
+                poco_information_f1(logger(), "Loaded installed configuration: %s", installedConfig.toString());
+                loadedDefaults = true;
+            }
+        }
+        if (!loadedDefaults)
         {
             // The file may be located in the ../Resources bundle dir on macOS, elsewhere relative
             // to the executable or within an absolute path.
