@@ -52,7 +52,7 @@
 #endif
 
 #ifdef THISIS395_VJ_EMBEDDED_RENDERER
-extern int RunProjectMRenderer(int argc, char* argv[]);
+extern int RunProjectMRenderer(int argc, char* argv[], bool verifyControlDir);
 #endif
 
 class NativeControlCenter final : public QMainWindow
@@ -790,7 +790,8 @@ int main(int argc, char** argv)
     SetCurrentProcessExplicitAppUserModelID(L"ThisIs395.VJ");
 #endif
 #ifdef THISIS395_VJ_EMBEDDED_RENDERER
-    if (argc > 1 && std::strcmp(argv[1], "--vj-renderer") == 0) {
+    const bool verifyControlDir = argc > 1 && std::strcmp(argv[1], "--vj-renderer-probe") == 0;
+    if (verifyControlDir || (argc > 1 && std::strcmp(argv[1], "--vj-renderer") == 0)) {
         std::vector<char*> rendererArgs;
         rendererArgs.reserve(static_cast<std::size_t>(argc));
         rendererArgs.push_back(argv[0]);
@@ -802,7 +803,7 @@ int main(int argc, char** argv)
         // reliable application/plugin environment to decode imported PNGs,
         // especially inside the deployed Windows/macOS app layout.
         QCoreApplication imageRuntime(rendererArgc, rendererArgs.data());
-        return RunProjectMRenderer(rendererArgc, rendererArgs.data());
+        return RunProjectMRenderer(rendererArgc, rendererArgs.data(), verifyControlDir);
     }
 #endif
     QApplication app(argc, argv);
