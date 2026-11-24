@@ -12,6 +12,7 @@
 #include <iostream>
 #include <cmath>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDir>
@@ -44,6 +45,10 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#ifdef Q_OS_WIN
+#include <shobjidl.h>
+#endif
 
 #ifdef THISIS395_VJ_EMBEDDED_RENDERER
 extern int RunProjectMRenderer(int argc, char* argv[]);
@@ -306,10 +311,11 @@ public:
             }
             auto* list = spriteManager_->findChild<QListWidget*>(QStringLiteral("sprite-live-list"));
             auto* scale = spriteManager_->findChild<QDoubleSpinBox*>(QStringLiteral("sprite-scale-input"));
+            auto* band = spriteManager_->findChild<QComboBox*>(QStringLiteral("sprite-audio-band"));
             auto* apply = spriteManager_->findChild<QPushButton*>(QStringLiteral("sprite-apply"));
             auto* refresh = spriteManager_->findChild<QPushButton*>(QStringLiteral("sprite-refresh"));
             auto* remove = spriteManager_->findChild<QPushButton*>(QStringLiteral("sprite-remove"));
-            if (!list || !scale || !apply || !refresh || !remove) {
+            if (!list || !scale || !band || !apply || !refresh || !remove) {
                 fail("Native Sprite Manager controls missing");
                 return;
             }
@@ -343,25 +349,39 @@ public:
                     fail("Scale edit did not reach the live renderer");
                     return;
                 }
-                refresh->click();
+                // This must execute the *original renderer-owned* audio-band
+                // reconstruction, not merely update a native combobox.
+                band->setCurrentIndex(3); // Treble (smoothed)
                 phase = 2;
-            } else if (phase == 2 && lastReplyAction_ == QStringLiteral("sprite.list") &&
+            } else if (phase == 2 && lastReplyAction_ == QStringLiteral("sprite.update") &&
+                       pendingId_.isEmpty()) {
+                const QJsonArray data = spriteManager_->currentState();
+                if (data.size() != 1 ||
+                    data.at(0).toObject().value(QStringLiteral("audioBand")).toInt(-1) != 3 ||
+                    lastRendererSpriteCount_ < 1) {
+                    fail("Treble audio band was not applied by the live sprite backend");
+                    return;
+                }
+                refresh->click();
+                phase = 3;
+            } else if (phase == 3 && lastReplyAction_ == QStringLiteral("sprite.list") &&
                        pendingId_.isEmpty()) {
                 const QJsonArray data = spriteManager_->currentState();
                 if (data.size() != 1 ||
                     std::abs(data.at(0).toObject().value(QStringLiteral("scale")).toDouble() -
-                             0.73) > 0.0001) {
-                    fail("Refresh lost edited sprite state");
+                             0.73) > 0.0001 ||
+                    data.at(0).toObject().value(QStringLiteral("audioBand")).toInt(-1) != 3) {
+                    fail("Refresh lost scale or audio-band sprite state");
                     return;
                 }
                 remove->click();
-                phase = 3;
-            } else if (phase == 3 && lastReplyAction_ == QStringLiteral("sprite.remove") &&
+                phase = 4;
+            } else if (phase == 4 && lastReplyAction_ == QStringLiteral("sprite.remove") &&
                        pendingId_.isEmpty() && spriteManager_->currentState().isEmpty() &&
                        list->count() == 0) {
                 timer->stop();
                 std::cout << "PASS: actual Add PNG file picker, decoded PNG texture, "
-                             "Qt live list, Apply/Refresh/Remove and renderer IPC" << std::endl;
+                             "Qt live list, numeric Apply, audio-band recompile, Refresh/Remove and renderer IPC" << std::endl;
                 QCoreApplication::exit(0);
             }
         });
@@ -714,6 +734,11 @@ private:
 
 int main(int argc, char** argv)
 {
+#ifdef Q_OS_WIN
+    // The Control Center and its renderer child are two windows of one app.
+    // An explicit shared AppUserModelID groups them under one taskbar identity.
+    SetCurrentProcessExplicitAppUserModelID(L"ThisIs395.VJ");
+#endif
 #ifdef THISIS395_VJ_EMBEDDED_RENDERER
     if (argc > 1 && std::strcmp(argv[1], "--vj-renderer") == 0) {
         std::vector<char*> rendererArgs;
