@@ -294,6 +294,20 @@ jobs:
           }
           Get-ChildItem -LiteralPath $suite | Select-Object Name, Length | Format-Table -AutoSize
 
+      - name: Verify packaged Windows renderer receives the control mailbox path
+        shell: pwsh
+        run: |
+          $suite = Join-Path $env:GITHUB_WORKSPACE 'ThisIs395-VJ-suite'
+          $probeDir = Join-Path $env:RUNNER_TEMP 'VJ mailbox parser probe'
+          New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+          $quotedDir = '"' + $probeDir + '"'
+          $probe = Start-Process -FilePath "$suite/ThisIs395-VJ.exe" -ArgumentList @('--vj-renderer-probe', '--controlDir', $quotedDir) -WorkingDirectory $suite -PassThru
+          if (-not $probe.WaitForExit(15000)) {
+            Stop-Process -Id $probe.Id -Force
+            throw 'Renderer mailbox parser probe did not exit'
+          }
+          if ($probe.ExitCode -ne 0) { throw "Renderer ignored or corrupted controlDir: exit $($probe.ExitCode)" }
+
       - name: Upload unified Windows suite (single ZIP download)
         uses: actions/upload-artifact@v6
         with:
