@@ -10,6 +10,9 @@ else()
 endif()
 
 target_link_libraries(ThisIs395-VJ-ControlCenter PRIVATE Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(ThisIs395-VJ-ControlCenter PRIVATE shell32)
+endif()
 # Identical user-supplied portrait on both the Qt window and SDL pop-out.
 set(VJ_PORTRAIT_ICON "${CMAKE_SOURCE_DIR}/branding/portrait-original.png")
 set_source_files_properties("${VJ_PORTRAIT_ICON}" PROPERTIES
