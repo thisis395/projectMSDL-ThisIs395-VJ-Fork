@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - feature/qt6-native-control-center
+      - master
   pull_request:
     branches:
       - master
@@ -337,7 +338,7 @@ jobs:
         run: test "$(uname -m)" = '${{ matrix.arch }}'
 
       - name: Install Build Dependencies
-        run: brew install sdl2 ninja googletest poco qt
+        run: brew install sdl2 ninja googletest poco qtbase
 
       - name: Checkout libprojectM Sources
         uses: actions/checkout@v6
@@ -374,7 +375,7 @@ jobs:
       - name: Build projectMSDL
         run: |
           mkdir cmake-build-frontend-sdl2
-          cmake -G Ninja -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 "-DCMAKE_PREFIX_PATH=${{ github.workspace }}/install-libprojectm;$(brew --prefix qt)" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
+          cmake -G Ninja -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 "-DCMAKE_PREFIX_PATH=${{ github.workspace }}/install-libprojectm;$(brew --prefix qtbase)" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
           cmake --build "${{ github.workspace }}/cmake-build-frontend-sdl2" --parallel
 
       - name: Package projectMSDL
@@ -389,14 +390,46 @@ jobs:
           APP="$GITHUB_WORKSPACE/ThisIs395-VJ-suite/projectM.app"
           test -x "$APP/Contents/MacOS/projectM"
           test ! -e "$APP/Contents/MacOS/ThisIs395-VJ-ControlCenter"
-          # The Qt entrypoint and SDL renderer are now the same Mach-O file.
-          "$(brew --prefix qt)/bin/macdeployqt" "$APP" -always-overwrite
+          set -euo pipefail
+          # Deploy both Mach-O entrypoints, including the offline renderer.
+          # Qt Widgets needs qtbase, not the entire Qt/QML plugin collection.
+          # Homebrew dylibs use @rpath names: supply every installed formula's
+          # lib directory so macdeployqt can resolve transitive dependencies.
+          qt_prefix="$(brew --prefix qtbase)"
+          deploy_args=(-always-overwrite -no-codesign "-executable=$APP/Contents/MacOS/projectMSDL-offline" "-libpath=$qt_prefix/lib" "-libpath=$(brew --prefix)/lib")
+          while IFS= read -r formula; do
+            libdir="$(brew --prefix)/opt/$formula/lib"
+            if [ -d "$libdir" ]; then
+              deploy_args+=("-libpath=$libdir")
+            fi
+          done < <(brew list --formula)
+          "$qt_prefix/bin/macdeployqt" "$APP" "${deploy_args[@]}" 2>&1 | tee macdeployqt.log
+          # macdeployqt can report errors yet return zero. Do not upload a
+          # partially deployed application.
+          if grep -q 'ERROR:' macdeployqt.log; then
+            echo "macdeployqt reported an incomplete deployment"
+            exit 1
+          fi
           /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable projectM' "$APP/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleName ThisIs395 VJ' "$APP/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c 'Delete :LSMinimumSystemVersion' "$APP/Contents/Info.plist" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 15.0' "$APP/Contents/Info.plist"
           # Reject the wrong architecture before distributing the bundle.
-          lipo -verify_arch '${{ matrix.arch }}' "$APP/Contents/MacOS/projectM"
+          lipo "$APP/Contents/MacOS/projectM" -verify_arch '${{ matrix.arch }}'
+          lipo "$APP/Contents/MacOS/projectMSDL-offline" -verify_arch '${{ matrix.arch }}'
+          test -f "$APP/Contents/PlugIns/platforms/libqcocoa.dylib"
+          # Sign only after all binaries and Info.plist have been finalized.
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # Check all shipped Mach-O files for direct references to the runner.
+          while IFS= read -r -d '' binary; do
+            if file -b "$binary" | grep -q 'Mach-O'; then
+              if otool -L "$binary" | tail -n +2 | grep -E '^[[:space:]]+(/opt/homebrew/|/usr/local/|/Users/runner/)'; then
+                echo "Unbundled dependency in $binary"
+                exit 1
+              fi
+            fi
+          done < <(find "$APP/Contents" -type f -print0)
           probe_dir="$RUNNER_TEMP/VJ mailbox parser probe"
           mkdir -p "$probe_dir"
           "$APP/Contents/MacOS/projectM" --vj-renderer-probe --controlDir "$probe_dir"
