@@ -22,6 +22,7 @@
 #include "notifications/PlaybackControlNotification.h"
 #include "gui/SpriteManagerWindow.h"
 #include "SDLRenderingWindow.h"
+#include "ProjectMSDLApplication.h"
 
 // Local-only, single-inflight v1 command mailbox. Called exclusively on the SDL
 // render thread, so libprojectM calls never race against rendering.
@@ -83,6 +84,21 @@ public:
                     .getSubsystem<SDLRenderingWindow>().GetRenderingWindow();
                 if (!window) throw Poco::InvalidArgumentException("Visualizer window is unavailable");
                 SDL_HideWindow(window);
+            } else if (action == "render.mesh") {
+                const int x = request->getValue<int>("meshX");
+                const int y = request->getValue<int>("meshY");
+                if (x < 8 || x > 300 || y < 8 || y > 300)
+                    throw Poco::InvalidArgumentException("Mesh dimensions must be between 8 and 300");
+                auto& app = ProjectMSDLApplication::instance();
+                auto config = app.UserConfiguration();
+                const auto file = app.CommandLineConfiguration()->getString("app.UserConfigurationFile", "");
+                if (file.empty())
+                    throw Poco::InvalidArgumentException("User configuration file is unavailable");
+                // Apply on the render thread through the existing configuration
+                // event handlers; use the same settings as the SDL UI.
+                config->setInt("projectM.meshX", x);
+                config->setInt("projectM.meshY", y);
+                config->save(file);
             } else if (action == "sprite.list") {
                 // Return all renderer-owned sprites below.
             } else if (action == "sprite.add") {
@@ -147,6 +163,12 @@ public:
                     live->add(item);
                 }
                 reply->set("sprites", live);
+            }
+            if (action == "ping" || action == "render.mesh") {
+                size_t x = 0, y = 0;
+                projectm_get_mesh_size(renderer, &x, &y);
+                reply->set("meshX", static_cast<int>(x));
+                reply->set("meshY", static_cast<int>(y));
             }
             reply->set("ok", true);
             reply->set("activeSpriteCount", static_cast<int>(projectm_sprite_get_sprite_count(renderer)));
