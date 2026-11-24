@@ -65,7 +65,10 @@ void ProjectMWrapper::initialize(Poco::Util::Application& app)
 
         projectm_set_window_size(_projectM, canvasWidth, canvasHeight);
         projectm_set_fps(_projectM, fps);
-        projectm_set_mesh_size(_projectM, _projectMConfigView->getInt("meshX", 48), _projectMConfigView->getInt("meshY", 32));
+        const auto meshX = _projectMConfigView->getUInt64("meshX", 96);
+        const auto meshY = _projectMConfigView->getUInt64("meshY", 54);
+        projectm_set_mesh_size(_projectM, meshX, meshY);
+        poco_information(_logger, "Effective projectM mesh: " + std::to_string(meshX) + " x " + std::to_string(meshY));
         projectm_set_aspect_correction(_projectM, _projectMConfigView->getBool("aspectCorrectionEnabled", true));
         projectm_set_preset_locked(_projectM, _projectMConfigView->getBool("presetLocked", false));
 
@@ -284,14 +287,8 @@ void ProjectMWrapper::RenderFrame()
     glClearColor(0.0, 0.0, 0.0, 0.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    size_t currentMeshX{0};
-    size_t currentMeshY{0};
-    projectm_get_mesh_size(_projectM, &currentMeshX, &currentMeshY);
-    if (currentMeshX != _projectMConfigView->getInt("meshX", 220) ||
-        currentMeshY != _projectMConfigView->getInt("meshY", 125))
-    {
-        projectm_set_mesh_size(_projectM, _projectMConfigView->getInt("meshX", 220), _projectMConfigView->getInt("meshY", 125));
-    }
+    // Mesh settings are applied at initialization and by the configuration
+    // event handler, never rebuilt or queried on the render hot path.
 
     // Add new audio data to the instance from the staging buffer
     {
@@ -491,6 +488,6 @@ void ProjectMWrapper::OnConfigurationPropertyRemoved(const std::string& key)
 
     if (key == "projectM.meshX" || key == "projectM.meshY")
     {
-        projectm_set_mesh_size(_projectM, _projectMConfigView->getUInt64("meshX", 48), _projectMConfigView->getUInt64("meshY", 32));
+        projectm_set_mesh_size(_projectM, _projectMConfigView->getUInt64("meshX", 96), _projectMConfigView->getUInt64("meshY", 54));
     }
 }
