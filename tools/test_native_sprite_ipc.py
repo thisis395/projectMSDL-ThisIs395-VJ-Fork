@@ -94,11 +94,21 @@ def main():
                     index=0, x=0.3, y=0.7, scale=0.6, opacity=0.8,
                     rotationRadians=0.4, gain=0.5, audioBand=1)
                 assert abs(result["sprites"][0]["scale"] - 0.6) < 0.00001, result
+                # Changing the band must rebuild the original MilkDrop sprite,
+                # not only change a Qt label or JSON mirror of the controls.
+                for band in (0, 1, 2, 3):
+                    result = command(
+                        mailbox, process, "sprite.update",
+                        index=0, x=0.3, y=0.7, scale=0.6, opacity=0.8,
+                        rotationRadians=0.4, gain=0.5, audioBand=band)
+                    assert result["sprites"][0]["audioBand"] == band, result
+                    assert result.get("activeSpriteCount", 0) >= 1, result
                 result = command(mailbox, process, "sprite.list")
+                assert result["sprites"][0]["audioBand"] == 3, result
                 assert len(result["sprites"]) == 1, result
                 result = command(mailbox, process, "sprite.remove", index=0)
                 assert not result["sprites"], result
-                print("PASS: ping, PNG import, live scale change, list and remove")
+                print("PASS: ping, PNG import, live scale, all audio bands, list and remove")
             except Exception:
                 print("Renderer output tail:", flush=True)
                 print((mailbox / "renderer.log").read_text(errors="replace")[-12000:])
