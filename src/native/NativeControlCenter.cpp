@@ -142,6 +142,47 @@ public:
         form->addRow(fullscreen_);
         visualLayout->addWidget(launchSettings);
 
+        auto* meshGroup = new QGroupBox(tr("Rendering quality"));
+        auto* meshForm = new QFormLayout(meshGroup);
+        auto* meshRow = new QWidget;
+        auto* meshLayout = new QHBoxLayout(meshRow);
+        meshLayout->setContentsMargins(0, 0, 0, 0);
+        meshX_ = new QSpinBox;
+        meshY_ = new QSpinBox;
+        meshX_->setObjectName(QStringLiteral("mesh-x"));
+        meshY_->setObjectName(QStringLiteral("mesh-y"));
+        meshX_->setAccessibleName(tr("Mesh width"));
+        meshY_->setAccessibleName(tr("Mesh height"));
+        for (auto* box : {meshX_, meshY_}) {
+            box->setRange(8, 300);
+            box->setToolTip(tr("Per-point transformation grid; higher values cost more CPU time. Not the output resolution."));
+        }
+        meshX_->setValue(96);
+        meshY_->setValue(54);
+        meshLayout->addWidget(meshX_);
+        meshLayout->addWidget(new QLabel(QStringLiteral("×")));
+        meshLayout->addWidget(meshY_);
+        auto* resetMesh = new QPushButton(tr("Default"));
+        connect(resetMesh, &QPushButton::clicked, this, [this] {
+            meshX_->setValue(96);
+            meshY_->setValue(54);
+        });
+        meshLayout->addWidget(resetMesh);
+        meshApply_ = new QPushButton(tr("Apply & save"));
+        meshApply_->setObjectName(QStringLiteral("mesh-apply"));
+        meshApply_->setEnabled(false);
+        connect(meshApply_, &QPushButton::clicked, this, [this] {
+            sendCommand(QStringLiteral("render.mesh"), QString(),
+                QJsonObject{{QStringLiteral("meshX"), meshX_->value()},
+                            {QStringLiteral("meshY"), meshY_->value()}});
+        });
+        meshLayout->addWidget(meshApply_);
+        meshForm->addRow(tr("Mesh X / Y"), meshRow);
+        auto* meshHelp = new QLabel(tr("96 × 54 recommended. Launch the visualizer, then apply changes live. Lower values can improve FPS."));
+        meshHelp->setWordWrap(true);
+        meshForm->addRow(meshHelp);
+        visualLayout->addWidget(meshGroup);
+
         auto* controls = new QHBoxLayout;
         start_ = new QPushButton(tr("Pop out visualizer"));
         stop_ = new QPushButton(tr("Close visualizer"));
@@ -452,8 +493,32 @@ public:
             } else if (phase == 4 && lastReplyAction_ == QStringLiteral("sprite.remove") &&
                        pendingId_.isEmpty() && spriteManager_->currentState().isEmpty() &&
                        list->count() == 0) {
+                if (!meshApply_->isEnabled()) {
+                    fail("Mesh control not enabled after renderer handshake");
+                    return;
+                }
+                meshX_->setValue(48);
+                meshY_->setValue(32);
+                meshApply_->click();
+                phase = 5;
+            } else if (phase == 5 && lastReplyAction_ == QStringLiteral("render.mesh") &&
+                       pendingId_.isEmpty()) {
+                if (!lastReplyOk_ || lastMeshX_ != 48 || lastMeshY_ != 32) {
+                    fail("Native mesh control did not change actual engine mesh");
+                    return;
+                }
+                meshX_->setValue(96);
+                meshY_->setValue(54);
+                meshApply_->click();
+                phase = 6;
+            } else if (phase == 6 && lastReplyAction_ == QStringLiteral("render.mesh") &&
+                       pendingId_.isEmpty()) {
+                if (!lastReplyOk_ || lastMeshX_ != 96 || lastMeshY_ != 54) {
+                    fail("Native mesh default restore did not reach engine");
+                    return;
+                }
                 timer->stop();
-                std::cout << "PASS: actual Add PNG file picker, decoded PNG texture, "
+                std::cout << "PASS: live mesh Apply/restore, actual Add PNG file picker, decoded PNG texture, "
                              "Qt live list, numeric Apply, audio-band recompile, Refresh/Remove and renderer IPC" << std::endl;
                 QCoreApplication::exit(0);
             }
@@ -484,6 +549,7 @@ private:
     {
         start_->setEnabled(!running);
         stop_->setEnabled(running);
+        if (!running) meshApply_->setEnabled(false);
     }
 
     void launchVisualizer()
@@ -716,6 +782,15 @@ private:
             handshakeRetries_ = 0;
             rendererReady_ = true;
             spriteManager_->setConnected(true);
+            meshApply_->setEnabled(response.contains(QStringLiteral("meshX")) &&
+                                   response.contains(QStringLiteral("meshY")));
+        }
+        if (ok && (action == QStringLiteral("ping") || action == QStringLiteral("render.mesh")) &&
+            response.contains(QStringLiteral("meshX")) && response.contains(QStringLiteral("meshY"))) {
+            lastMeshX_ = response.value(QStringLiteral("meshX")).toInt();
+            lastMeshY_ = response.value(QStringLiteral("meshY")).toInt();
+            meshX_->setValue(lastMeshX_);
+            meshY_->setValue(lastMeshY_);
         }
         if (ok && response.value(QStringLiteral("sprites")).isArray()) {
             // Defer a state refresh until all pending slider edits have landed.
@@ -734,6 +809,8 @@ private:
                 .arg(response.value(QStringLiteral("presetIndex")).toInt())
                 .arg(response.value(QStringLiteral("shuffle")).toBool() ? tr("on") : tr("off"))
                 .arg(response.value(QStringLiteral("locked")).toBool() ? tr("yes") : tr("no")));
+            if (action == QStringLiteral("render.mesh"))
+                status_->setText(tr("Live mesh applied and saved: %1 × %2").arg(lastMeshX_).arg(lastMeshY_));
             if (action == QStringLiteral("sprite.update"))
                 spriteManager_->setStatus(tr("Live sprite settings applied."));
             else if (action == QStringLiteral("sprite.add"))
@@ -795,6 +872,11 @@ private:
     QLineEdit* texturePath_ = nullptr;
     QSpinBox* width_ = nullptr;
     QSpinBox* height_ = nullptr;
+    QSpinBox* meshX_ = nullptr;
+    QSpinBox* meshY_ = nullptr;
+    QPushButton* meshApply_ = nullptr;
+    int lastMeshX_ = -1;
+    int lastMeshY_ = -1;
     QCheckBox* fullscreen_ = nullptr;
     QPushButton* start_ = nullptr;
     QPushButton* stop_ = nullptr;
