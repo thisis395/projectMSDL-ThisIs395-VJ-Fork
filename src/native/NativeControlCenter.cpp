@@ -284,11 +284,23 @@ public:
                 QCoreApplication::exit(1);
                 return;
             }
-            dialog->selectFile(pngPath);
-            if (!QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection)) {
-                std::cerr << "FAIL: QFileDialog accept slot unavailable" << std::endl;
+            const QFileInfo png(pngPath);
+            if (!png.isFile() || !png.isReadable()) {
+                std::cerr << "FAIL: smoke PNG missing or unreadable: "
+                          << pngPath.toStdString() << std::endl;
                 QCoreApplication::exit(1);
+                return;
             }
+            // QFileSystemModel populates asynchronously. Select the basename
+            // only after navigating to its directory, then exercise accept.
+            dialog->setDirectory(png.absolutePath());
+            QTimer::singleShot(500, dialog, [dialog, png] {
+                dialog->selectFile(png.fileName());
+                if (!QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection)) {
+                    std::cerr << "FAIL: QFileDialog accept slot unavailable" << std::endl;
+                    QCoreApplication::exit(1);
+                }
+            });
         });
         connect(timer, &QTimer::timeout, this, [this, timer, started, phase = 0]() mutable {
             const auto fail = [this](const char* why) {
