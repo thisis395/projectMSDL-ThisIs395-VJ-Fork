@@ -21,6 +21,11 @@
 ProjectMSDLApplication::ProjectMSDLApplication()
     : Poco::Util::Application()
 {
+    // Qt launches the renderer with --long-option arguments on every OS.
+    // POCO defaults to slash-style options on Windows, silently ignoring
+    // --controlDir and leaving the renderer disconnected from its controller.
+    setUnixOptions(true);
+
     // Note: order here is important, as subsystems are initialized in the same order.
     addSubsystem(new SDLRenderingWindow);
     addSubsystem(new ProjectMWrapper);
