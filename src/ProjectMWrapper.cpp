@@ -83,7 +83,7 @@ void ProjectMWrapper::initialize(Poco::Util::Application& app)
         // sprites while preserving filesystem fallbacks for preset textures.
         projectm_set_texture_load_event_callback(
             _projectM,
-            [](const char* textureName, projectm_texture_load_data* out, void* user) {
+            [](const char* textureName, struct projectm_texture_load_data* out, void* user) {
                 if (!textureName || !out || !user) return;
                 auto* wrapper = static_cast<ProjectMWrapper*>(user);
                 const auto found = wrapper->_spriteTextureData.find(textureName);
