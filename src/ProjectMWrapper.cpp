@@ -201,8 +201,10 @@ bool ProjectMWrapper::PrepareSpriteTexture(const std::string& path, std::string&
         error = "PNG has invalid dimensions";
         return false;
     }
-    // libprojectM's callback expects the bottom image row first.
-    image = image.convertToFormat(QImage::Format_RGBA8888).mirrored(false, true);
+    // MilkdropSprite maps its upper vertices to v=0 and lower vertices to
+    // v=1, matching stb_image's top-first rows. Keep QImage's native row
+    // order; pre-flipping here would display the PNG upside down.
+    image = image.convertToFormat(QImage::Format_RGBA8888);
     const std::size_t stride = static_cast<std::size_t>(image.width()) * 4;
     SpriteTextureData tex;
     tex.width = static_cast<unsigned int>(image.width());
