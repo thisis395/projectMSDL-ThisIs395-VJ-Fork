@@ -41,6 +41,8 @@ The first projectM GUI launch with the large collection took **28 minutes and 1 
 
 These are historical observations, not controlled benchmarks or guaranteed installation times. The more recent collection contains roughly 135,000 files and occupies around 4 GB uncompressed. Preset counts and sizes vary by pack.
 
+**God help you if you use a Toshitba HDD on USB 2.0.** Between mechanical seek latency, USB 2.0 bandwidth, and hundreds of thousands of small files, the bottleneck may become your remaining natural lifespan. Seriously, use an SSD over USB 3.0 or faster if possible.
+
 ### Recommended precautions
 
 - Allow sufficient free space for both the compressed archive and the extracted collection.
