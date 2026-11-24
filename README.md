@@ -28,6 +28,32 @@ As a result, Windows was used not out of preference, but out of necessity. The R
 
 The use of Windows during development does not constitute an endorsement of Windows.
 
+## Preset Pack Warning: Your SSD May Start Screaming
+
+> [!WARNING]
+> Large MilkDrop/projectM preset collections can contain hundreds of thousands of tiny files. Extracting, copying, scanning, or indexing them can cause prolonged storage activity, high I/O latency, and a temporarily unresponsive system. An SSD is strongly recommended, but even an SSD is not immune to suffering.
+
+For reference, the developer's larger historical collection contained approximately **283,000 files and nearly 28 GB** of presets and textures. File transfers involving this collection took approximately **22 hours on both Windows and macOS**. The older test machine was a 2014 MacBook Pro transferring to a SanDisk Extreme Portable SSD over USB 3.0.
+
+For comparison, nearly 300 GB of other data was restored from that 2014 MacBook Pro to a newer Intel i9 MacBook Pro in just 26 minutes. The preset collection was considerably smaller in bytes, but apparently much larger in emotional damage.
+
+The first projectM GUI launch with the large collection took **28 minutes and 1 second**. A later launch following a cold reboot took approximately 15 seconds. The SSD, according to the developer, was still screaming.
+
+These are historical observations, not controlled benchmarks or guaranteed installation times. The more recent collection contains roughly 135,000 files and occupies around 4 GB uncompressed. Preset counts and sizes vary by pack.
+
+### Recommended precautions
+
+- Allow sufficient free space for both the compressed archive and the extracted collection.
+- Start with a smaller preset selection if you do not need the entire library.
+- Avoid extracting or scanning the pack while rendering video, processing audio, or performing other storage-intensive work.
+- If the disk is saturated, let the operation finish. Check storage activity and free space before assuming the application has frozen.
+- If copying the entire collection between computers, consider transferring a single archive and extracting it locally rather than transferring hundreds of thousands of individual files. This does not eliminate the extraction cost.
+- Do not repeatedly force traditional defragmentation on an SSD. Use the operating system's normal SSD optimization facilities.
+
+The sound of an SSD screaming is figurative. If your SSD is literally screaming, please investigate other components before opening a GitHub issue.
+
+**No SSDs were intentionally harmed in the development of ThisIs395 VJ. Unintentional emotional damage remains under investigation.**
+
 ## Development Philosophy
 
 - If it compiles, it might work.
