@@ -86,6 +86,7 @@ public:
         rotation_ = addSlider(form, tr("Rotation (degrees)"), -180, 180, 0, 1, 1);
         gain_ = addSlider(form, tr("Audio gain"), 0, 3, 0.35, 0.05, 3);
         band_ = new QComboBox;
+        band_->setObjectName(QStringLiteral("sprite-audio-band"));
         band_->addItems({tr("Off"), tr("Bass (smoothed)"),
                          tr("Mids (smoothed)"), tr("Treble (smoothed)")});
         form->addRow(tr("Audio band"), band_);
@@ -308,10 +309,22 @@ private:
         layout->addWidget(slider, 1);
         layout->addWidget(spin);
         form->addRow(label, row);
+        // The original ImGui controls own one value until the edit is committed.
+        // Do the same here: renderer acknowledgments and slider synchronization
+        // must never replace an in-progress number in the Qt editor.
         connect(slider, &QSlider::valueChanged, spin,
-                [spin](int value) { spin->setValue(value / 1000.0); });
+                [spin](int value) {
+                    QWidget* focus = QApplication::focusWidget();
+                    if (focus && (focus == spin || spin->isAncestorOf(focus)))
+                        return;
+                    const QSignalBlocker blockSpin(spin);
+                    spin->setValue(value / 1000.0);
+                });
         connect(spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), slider,
-                [slider](double value) { slider->setValue(static_cast<int>(std::round(value * 1000))); });
+                [slider](double value) {
+                    const QSignalBlocker blockSlider(slider);
+                    slider->setValue(static_cast<int>(std::round(value * 1000)));
+                });
         connect(slider, &QSlider::sliderReleased, this, [this] {
             if (!syncing_) applyChanges();
         });
