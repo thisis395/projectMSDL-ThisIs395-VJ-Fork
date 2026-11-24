@@ -84,7 +84,7 @@ public:
         tabs->setCornerWidget(panic, Qt::TopRightCorner);
         connect(panic, &QPushButton::clicked, this, [this] {
             const QUrl readme(QStringLiteral(
-                "https://github.com/thisis395/projectMSDL-ThisIs395-VJ-Fork/blob/feature/qt6-native-control-center/README.md"));
+                "https://github.com/thisis395/projectMSDL-ThisIs395-VJ-Fork#readme"));
             if (!QDesktopServices::openUrl(readme))
                 QMessageBox::warning(this, tr("huh?"),
                     tr("Could not open the README in your browser.\n%1").arg(readme.toString()));
