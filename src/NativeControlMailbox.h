@@ -1,5 +1,6 @@
 #pragma once
 
+#include <projectM-4/user_sprites.h>
 #include <Poco/File.h>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Array.h>
