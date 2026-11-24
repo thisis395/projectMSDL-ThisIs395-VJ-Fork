@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ThisIs395 VJ Control Center
+Comment=Native show editor and projectM visualization control
+Exec=ThisIs395-VJ-ControlCenter
+Icon=ThisIs395-VJ-ControlCenter
+Terminal=false
+Categories=AudioVideo;Audio;Video;

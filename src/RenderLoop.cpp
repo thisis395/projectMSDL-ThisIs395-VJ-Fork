@@ -1,6 +1,7 @@
 #include "RenderLoop.h"
 
 #include "FPSLimiter.h"
+#include "NativeControlMailbox.h"
 
 #include "gui/ProjectMGUI.h"
 
@@ -33,12 +34,15 @@ void RenderLoop::Run()
 
     _projectMWrapper.DisplayInitialPreset();
 
+    NativeControlMailbox mailbox(ProjectMSDLApplication::instance().config().getString("native.controlDir", ""));
+
     while (!_wantsToQuit)
     {
         limiter.TargetFPS(_projectMWrapper.TargetFPS());
         limiter.StartFrame();
 
         PollEvents();
+        mailbox.poll(_projectMHandle, _playlistHandle, _projectMGui.ManagedSprites());
         CheckViewportSize();
         _audioCapture.FillBuffer();
         _projectMWrapper.RenderFrame();

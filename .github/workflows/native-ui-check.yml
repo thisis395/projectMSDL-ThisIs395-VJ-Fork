@@ -1,0 +1,80 @@
+name: Qt6 Native Widget Tests (non-distributable)
+
+on:
+  push:
+    branches:
+      - feature/qt6-native-control-center
+  pull_request:
+    paths:
+      - 'src/native/**'
+      - '.github/workflows/native-ui-check.yml'
+      - 'CMakeLists.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-package:
+    name: Native UI ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            label: Windows x64
+            os_tag: windows-x64
+            qt_arch: win64_msvc2022_64
+          - runner: macos-15-intel
+            label: macOS Intel
+            os_tag: macos-intel
+            qt_arch: clang_64
+          - runner: ubuntu-22.04
+            label: Linux x64
+            os_tag: linux-x64
+            qt_arch: gcc_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Qt6
+        if: runner.os != 'Linux'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+      - name: Install Qt6 and Linux GUI dependencies from Ubuntu packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools qmake6 ninja-build pkg-config \
+            libgl1-mesa-dev libegl1-mesa-dev libgl1 libxkbcommon-x11-0 libxcb-cursor0 libfuse2 \
+            libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0
+          qmake6 -query QT_VERSION
+          dpkg-query -W -f='Qt6 development package: ${Version}\n' qt6-base-dev
+      - name: Generate shared icon assets from original portrait
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python tools/generate_icons.py
+          # linuxdeploy requires this filename to match the desktop entry.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp src/resources/icons/icon_scalable.svg src/native/packaging/ThisIs395-VJ-ControlCenter.svg
+          fi
+      - name: Configure standalone native Qt application
+        shell: bash
+        run: cmake -S src/native/standalone -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Compile native Qt application
+        shell: bash
+        run: cmake --build build/native --parallel 2
+      - name: Exercise native Sprite Manager buttons
+        shell: bash
+        run: ctest --test-dir build/native --output-on-failure
+      # The standalone Qt target is only an isolated regression-test harness.
+      # It cannot load or render projectM sprites by itself. Do not upload it
+      # as a user-facing app: use unified-suite.yaml for release ZIPs.
+      - name: Confirm test-only build
+        run: echo "Qt widget tests passed; full unified app packages are built by unified-suite."

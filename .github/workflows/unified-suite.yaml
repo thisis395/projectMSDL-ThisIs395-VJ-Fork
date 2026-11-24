@@ -1,0 +1,443 @@
+# Build check workflow
+# Used to check if projectMSDL compiles with upstream master of libprojectM.
+# The resulting binaries are not considered for public use though.
+name: Single-Executable ThisIs395 VJ
+
+on:
+  push:
+    branches:
+      - feature/qt6-native-control-center
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    name: Ubuntu Linux, x86_64
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential libgl1-mesa-dev mesa-common-dev libsdl2-dev libpoco-dev ninja-build libssl-dev libfreetype6-dev qt6-base-dev qmake6 qt6-qpa-plugins
+
+      # We need to build/link Poco ourselves as static libraries, because Ubuntu Jammy ships with a broken Poco 1.11.0
+      - name: Checkout Poco Sources
+        uses: actions/checkout@v6
+        with:
+          repository: pocoproject/poco
+          path: poco
+          ref: 'poco-1.14.1'
+          submodules: recursive
+
+      - name: Build Poco
+        run: |
+          mkdir cmake-build-poco
+          cmake -G Ninja -S poco -B cmake-build-poco  \
+            -DBUILD_SHARED_LIBS=OFF  \
+            -DCMAKE_BUILD_TYPE=Release  \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install-poco  \
+            -DENABLE_MONGODB=OFF  \
+            -DENABLE_REDIS=OFF  \
+            -DENABLE_PAGECOMPILER=OFF  \
+            -DENABLE_PAGECOMPILER_FILE2PAGE=OFF  \
+            -DENABLE_ACTIVERECORD=OFF  \
+            -DENABLE_ACTIVERECORD_COMPILER=OFF  \
+            -DENABLE_DATA_ODBC=OFF  \
+            -DENABLE_DATA_POSTGRESQL=OFF  \
+            -DENABLE_DATA_MYSQL=OFF  \
+            -DENABLE_JWT=OFF  \
+            -DENABLE_PROMETHEUS=OFF
+          cmake --build cmake-build-poco --parallel
+          cmake --install "${{ github.workspace }}/cmake-build-poco"
+
+      - name: Checkout libprojectM Sources
+        uses: actions/checkout@v6
+        with:
+          repository: projectM-visualizer/projectm
+          # Known 4.2.0 revision with the texture-load callback API.
+          ref: 9e26f5b5bf89b015f197a16a61bcb21f4946d985
+          path: projectm
+          submodules: recursive
+
+      - name: Build/Install libprojectM
+        run: |
+          mkdir cmake-build-libprojectm
+          cmake -G Ninja -S projectm -B cmake-build-libprojectm  \
+            -DBUILD_SHARED_LIBS=OFF  \
+            -DCMAKE_BUILD_TYPE=Release  \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install-libprojectm
+          cmake --build cmake-build-libprojectm --parallel
+          cmake --install "${{ github.workspace }}/cmake-build-libprojectm"
+
+      - name: Checkout frontend-sdl2 Sources
+        uses: actions/checkout@v6
+        with:
+          path: frontend-sdl2
+          submodules: recursive
+
+      - name: Set up Python for application icon generation
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Generate branded application icons
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python frontend-sdl2/tools/generate_icons.py
+
+      - name: Build frontend-sdl2
+        run: |
+          mkdir cmake-build-frontend-sdl2
+          cmake -G Ninja -S frontend-sdl2 -B cmake-build-frontend-sdl2  \
+            -DCMAKE_BUILD_TYPE=Release  \
+            "-DCMAKE_PREFIX_PATH=${GITHUB_WORKSPACE}/install-libprojectm;${GITHUB_WORKSPACE}/install-poco"  \
+            "-DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install-frontend-sdl2" \
+            -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
+          cmake --build cmake-build-frontend-sdl2 --parallel
+
+      - name: Verify single-executable UI and renderer modes (headless)
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXE=cmake-build-frontend-sdl2/src/native/ThisIs395-VJ
+          test -x "$EXE"
+          # The *same* binary contains the original Poco/SDL renderer entrypoint.
+          "$EXE" --vj-renderer --help > renderer-help.log 2>&1
+          grep -q 'projectM SDL' renderer-help.log
+          # Qt window should remain alive in offscreen mode rather than exit/crash.
+          QT_QPA_PLATFORM=offscreen timeout 3 "$EXE" > qt-offscreen.log 2>&1 && rc=0 || rc=$?
+          if [ "$rc" != 124 ]; then
+            cat qt-offscreen.log
+            echo "Qt frontend exited unexpectedly: $rc"
+            exit 1
+          fi
+          echo "Native Qt frontend and embedded renderer entrypoint verified."
+
+      - name: Headless live Sprite Manager smoke test
+        run: |
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri
+          LIBGL_ALWAYS_SOFTWARE=1 timeout 90s xvfb-run -a -s "-screen 0 1280x720x24" \
+            python3 frontend-sdl2/tools/test_native_sprite_ipc.py \
+              --exe cmake-build-frontend-sdl2/src/native/ThisIs395-VJ
+
+      - name: End-to-end native Qt Sprite Manager GUI and renderer integration
+        run: |
+          # Drive the real Qt Control Center, which starts its own renderer.
+          # Unlike the direct mailbox test, this verifies Qt list population,
+          # the Apply/Refresh/Remove buttons and native IPC together.
+          LIBGL_ALWAYS_SOFTWARE=1 SDL_AUDIODRIVER=dummy timeout 90s \
+            xvfb-run -a -s "-screen 0 1280x720x24" \
+            cmake-build-frontend-sdl2/src/native/ThisIs395-VJ \
+              --vj-control-smoke "$GITHUB_WORKSPACE/frontend-sdl2/branding/portrait-original.png"
+
+      - name: Offline render driver syntax + FFmpeg smoke test
+        run: |
+          sudo apt-get install -y ffmpeg
+          python3 -m py_compile frontend-sdl2/tools/render_offline.py
+          python3 frontend-sdl2/tools/test_render_offline.py
+
+      - name: Package projectMSDL
+        run: |
+          cd cmake-build-frontend-sdl2
+          cpack -G DEB
+
+      - name: Verify Debian package has exactly one main GUI executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb=$(find cmake-build-frontend-sdl2 -maxdepth 1 -name '*.deb' -print -quit)
+          test -n "$deb"
+          dpkg-deb --contents "$deb" > deb-manifest.txt
+          grep -Eq '/usr/bin/ThisIs395-VJ$' deb-manifest.txt
+          if grep -Eq '/usr/bin/projectMSDL$|/usr/bin/ThisIs395-VJ-ControlCenter$' deb-manifest.txt; then
+            echo "Package accidentally includes old standalone GUI executable"
+            exit 1
+          fi
+          echo "DEB provides one GUI executable and its auxiliary offline renderer."
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ThisIs395-VJ-suite-linux-x64
+          path: cmake-build-frontend-sdl2/*.deb
+          if-no-files-found: error
+
+  build-windows:
+    name: Windows, x64
+    runs-on: windows-latest
+    env:
+      USERNAME: projectM-visualizer
+      VCPKG_EXE: ${{ github.workspace }}/vcpkg/vcpkg
+      FEED_URL: https://nuget.pkg.github.com/projectM-visualizer/index.json
+      VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/projectM-visualizer/index.json,readwrite"
+
+
+    steps:
+      - name: Checkout vcpkg
+        uses: actions/checkout@v6
+        with:
+          repository: microsoft/vcpkg
+          path: vcpkg
+          submodules: recursive
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: ${{ github.workspace }}/vcpkg/bootstrap-vcpkg.bat
+
+      - name: Add NuGet sources
+        shell: pwsh
+        run: |
+          .$(${{ env.VCPKG_EXE }} fetch nuget) `
+            sources add `
+            -Source "${{ env.FEED_URL }}" `
+            -StorePasswordInClearText `
+            -Name GitHubPackages `
+            -UserName "${{ env.USERNAME }}" `
+            -Password "${{ secrets.VCPKG_PACKAGES_TOKEN }}"
+          .$(${{ env.VCPKG_EXE }} fetch nuget) `
+            setapikey "${{ secrets.VCPKG_PACKAGES_TOKEN }}" `
+            -Source "${{ env.FEED_URL }}"
+
+      - name: Checkout libprojectM Sources
+        uses: actions/checkout@v6
+        with:
+          repository: projectM-visualizer/projectm
+          # Known 4.2.0 revision with the texture-load callback API.
+          ref: 9e26f5b5bf89b015f197a16a61bcb21f4946d985
+          path: projectm
+          submodules: recursive
+
+      - name: Build/Install libprojectM
+        run: |
+          mkdir cmake-build-libprojectm
+          cmake -G "Visual Studio 18 2026" -A "X64" -S "${{ github.workspace }}/projectm" -B "${{ github.workspace }}/cmake-build-libprojectm" -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-libprojectm" -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" -DCMAKE_VERBOSE_MAKEFILE=YES -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=NO
+          cmake --build "${{ github.workspace }}/cmake-build-libprojectm" --config Release --parallel
+          cmake --install "${{ github.workspace }}/cmake-build-libprojectm" --config Release
+
+      - name: Checkout projectMSDL Sources
+        uses: actions/checkout@v6
+        with:
+          path: frontend-sdl2
+          submodules: recursive
+
+      - name: Set up Python for application icon generation
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Generate branded application icons
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python frontend-sdl2/tools/generate_icons.py
+
+      - name: Install Qt6 for unified control center
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Use only the explicitly built projectM SDK
+        shell: pwsh
+        run: |
+          # The legacy manifest includes projectM 4.1.x for standalone releases.
+          # This job links the upstream 4.2.0 SDK instead. Installing both puts
+          # old headers ahead of the new library in MSVC's include search order.
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'frontend-sdl2/vcpkg.json'
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest.dependencies = @($manifest.dependencies | Where-Object {
+            if ($_ -is [string]) { $_ -ne 'projectm' } else { $_.name -ne 'projectm' }
+          })
+          $manifest | ConvertTo-Json -Depth 20 | Set-Content $manifestPath -Encoding utf8
+          $header = Join-Path $env:GITHUB_WORKSPACE 'install-libprojectm/include/projectM-4/callbacks.h'
+          if (-not (Select-String -Path $header -Pattern 'projectm_set_texture_load_event_callback' -Quiet)) {
+            throw 'The selected projectM SDK does not provide the required texture callback'
+          }
+
+      - name: Build projectMSDL
+        run: |
+          mkdir cmake-build-frontend-sdl2
+          cmake -G "Visual Studio 18 2026" -A "X64" -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static  -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-libprojectm" -DprojectM4_DIR="${{ github.workspace }}/install-libprojectm/lib/cmake/projectM4" -DprojectM4Playlist_DIR="${{ github.workspace }}/install-libprojectm/lib/cmake/projectM4Playlist" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" -DCMAKE_VERBOSE_MAKEFILE=YES -DSDL2_LINKAGE=static -DBUILD_TESTING=YES -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
+          if (Test-Path "${{ github.workspace }}/cmake-build-frontend-sdl2/vcpkg_installed/x64-windows-static/include/projectM-4/callbacks.h") {
+            throw 'Duplicate projectM headers found in vcpkg; refusing a mixed SDK build'
+          }
+          cmake --build "${{ github.workspace }}/cmake-build-frontend-sdl2" --parallel --config Release
+
+      - name: Package projectMSDL
+        run: |
+          cd cmake-build-frontend-sdl2
+          cpack -G ZIP
+
+      - name: Install combined app and deploy Qt runtime
+        shell: pwsh
+        run: |
+          $suite = Join-Path $env:GITHUB_WORKSPACE "ThisIs395-VJ-suite"
+          cmake --install "cmake-build-frontend-sdl2" --config Release --prefix "$suite"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path "$suite/ThisIs395-VJ.exe")) { throw 'Unified VJ executable missing from package' }
+          if (Test-Path "$suite/projectMSDL.exe") { throw 'Separate SDL renderer accidentally packaged' }
+          if (Test-Path "$suite/ThisIs395-VJ-ControlCenter.exe") { throw 'Separate Qt controller accidentally packaged' }
+          & (Get-Command windeployqt.exe -ErrorAction Stop).Source --release --no-translations --no-compiler-runtime "$suite/ThisIs395-VJ.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path "$suite/platforms/qwindows.dll")) { throw 'Qt platform plugin missing' }
+          "Run ThisIs395-VJ.exe. It opens the native control center and can pop out the SDL visualizer using --vj-renderer internally." | Set-Content "$suite/README.txt"
+          # Verify one primary executable, plus the offline video renderer helper.
+          foreach ($required in @("ThisIs395-VJ.exe", "projectMSDL-offline.exe", "platforms/qwindows.dll")) {
+            $full = Join-Path $suite $required
+            if (!(Test-Path -LiteralPath $full -PathType Leaf)) { throw "Unified suite missing: $required" }
+          }
+          Get-ChildItem -LiteralPath $suite | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Verify packaged Windows renderer receives the control mailbox path
+        shell: pwsh
+        run: |
+          $suite = Join-Path $env:GITHUB_WORKSPACE 'ThisIs395-VJ-suite'
+          $probeDir = Join-Path $env:RUNNER_TEMP 'VJ mailbox parser probe'
+          New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+          $quotedDir = '"' + $probeDir + '"'
+          $probe = Start-Process -FilePath "$suite/ThisIs395-VJ.exe" -ArgumentList @('--vj-renderer-probe', '--controlDir', $quotedDir) -WorkingDirectory $suite -PassThru
+          if (-not $probe.WaitForExit(15000)) {
+            Stop-Process -Id $probe.Id -Force
+            throw 'Renderer mailbox parser probe did not exit'
+          }
+          if ($probe.ExitCode -ne 0) { throw "Renderer ignored or corrupted controlDir: exit $($probe.ExitCode)" }
+
+      - name: Upload unified Windows suite (single ZIP download)
+        uses: actions/upload-artifact@v6
+        with:
+          name: ThisIs395-VJ-suite-windows-x64
+          # GitHub Actions already ZIPs the directory. Avoid nested ZIP archives.
+          path: ThisIs395-VJ-suite/
+          if-no-files-found: error
+
+  build-darwin:
+    name: macOS, ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+            artifact: intel
+          - runner: macos-15
+            arch: arm64
+            artifact: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '15.0'
+
+    steps:
+      - name: Verify native runner architecture
+        run: test "$(uname -m)" = '${{ matrix.arch }}'
+
+      - name: Install Build Dependencies
+        run: brew install sdl2 ninja googletest poco qtbase
+
+      - name: Checkout libprojectM Sources
+        uses: actions/checkout@v6
+        with:
+          repository: projectM-visualizer/projectm
+          # Known 4.2.0 revision with the texture-load callback API.
+          ref: 9e26f5b5bf89b015f197a16a61bcb21f4946d985
+          path: projectm
+          submodules: recursive
+
+      - name: Build/Install libprojectM
+        run: |
+          mkdir cmake-build-libprojectm
+          cmake -G Ninja -S "${{ github.workspace }}/projectm" -B "${{ github.workspace }}/cmake-build-libprojectm" -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-libprojectm"
+          cmake --build "${{ github.workspace }}/cmake-build-libprojectm" --parallel
+          cmake --install "${{ github.workspace }}/cmake-build-libprojectm"
+
+      - name: Checkout projectMSDL Sources
+        uses: actions/checkout@v6
+        with:
+          path: frontend-sdl2
+          submodules: recursive
+
+      - name: Set up Python for application icon generation
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Generate branded application icons
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python frontend-sdl2/tools/generate_icons.py
+
+      - name: Build projectMSDL
+        run: |
+          mkdir cmake-build-frontend-sdl2
+          cmake -G Ninja -S "${{ github.workspace }}/frontend-sdl2" -B "${{ github.workspace }}/cmake-build-frontend-sdl2" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 "-DCMAKE_PREFIX_PATH=${{ github.workspace }}/install-libprojectm;$(brew --prefix qtbase)" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-frontend-sdl2" -DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON
+          cmake --build "${{ github.workspace }}/cmake-build-frontend-sdl2" --parallel
+
+      - name: Package projectMSDL
+        run: |
+          cd cmake-build-frontend-sdl2
+          cpack -G TGZ
+
+      - name: Install unified macOS bundle and deploy Qt
+        shell: bash
+        run: |
+          cmake --install cmake-build-frontend-sdl2 --prefix "$GITHUB_WORKSPACE/ThisIs395-VJ-suite"
+          APP="$GITHUB_WORKSPACE/ThisIs395-VJ-suite/projectM.app"
+          test -x "$APP/Contents/MacOS/projectM"
+          test ! -e "$APP/Contents/MacOS/ThisIs395-VJ-ControlCenter"
+          set -euo pipefail
+          # Deploy both Mach-O entrypoints, including the offline renderer.
+          # Qt Widgets needs qtbase, not the entire Qt/QML plugin collection.
+          # Homebrew dylibs use @rpath names: supply every installed formula's
+          # lib directory so macdeployqt can resolve transitive dependencies.
+          qt_prefix="$(brew --prefix qtbase)"
+          deploy_args=(-always-overwrite -no-codesign "-executable=$APP/Contents/MacOS/projectMSDL-offline" "-libpath=$qt_prefix/lib" "-libpath=$(brew --prefix)/lib")
+          while IFS= read -r formula; do
+            libdir="$(brew --prefix)/opt/$formula/lib"
+            if [ -d "$libdir" ]; then
+              deploy_args+=("-libpath=$libdir")
+            fi
+          done < <(brew list --formula)
+          "$qt_prefix/bin/macdeployqt" "$APP" "${deploy_args[@]}" 2>&1 | tee macdeployqt.log
+          # macdeployqt can report errors yet return zero. Do not upload a
+          # partially deployed application.
+          if grep -q 'ERROR:' macdeployqt.log; then
+            echo "macdeployqt reported an incomplete deployment"
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable projectM' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleName ThisIs395 VJ' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Delete :LSMinimumSystemVersion' "$APP/Contents/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 15.0' "$APP/Contents/Info.plist"
+          # Reject the wrong architecture before distributing the bundle.
+          lipo "$APP/Contents/MacOS/projectM" -verify_arch '${{ matrix.arch }}'
+          lipo "$APP/Contents/MacOS/projectMSDL-offline" -verify_arch '${{ matrix.arch }}'
+          test -f "$APP/Contents/PlugIns/platforms/libqcocoa.dylib"
+          # Sign only after all binaries and Info.plist have been finalized.
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # Check all shipped Mach-O files for direct references to the runner.
+          while IFS= read -r -d '' binary; do
+            if file -b "$binary" | grep -q 'Mach-O'; then
+              if otool -L "$binary" | tail -n +2 | grep -E '^[[:space:]]+(/opt/homebrew/|/usr/local/|/Users/runner/)'; then
+                echo "Unbundled dependency in $binary"
+                exit 1
+              fi
+            fi
+          done < <(find "$APP/Contents" -type f -print0)
+          probe_dir="$RUNNER_TEMP/VJ mailbox parser probe"
+          mkdir -p "$probe_dir"
+          "$APP/Contents/MacOS/projectM" --vj-renderer-probe --controlDir "$probe_dir"
+          (cd "$GITHUB_WORKSPACE/ThisIs395-VJ-suite" && tar -czf "$GITHUB_WORKSPACE/ThisIs395-VJ-suite-macos-${{ matrix.artifact }}.tar.gz" projectM.app)
+
+      - name: Upload unified macOS suite
+        uses: actions/upload-artifact@v6
+        with:
+          name: ThisIs395-VJ-suite-macos-${{ matrix.artifact }}
+          path: ThisIs395-VJ-suite-macos-${{ matrix.artifact }}.tar.gz
+          if-no-files-found: error

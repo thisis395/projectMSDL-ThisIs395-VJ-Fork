@@ -1,11 +1,150 @@
-# ProjectM SDL2 Frontend
+# ThisIs395 VJ
 
-This is a reference implementation of an application that makes use of the projectM music visualization library.
+A cross-platform, GPU-accelerated music visualization and VJ production suite powered by projectM, SDL2, Qt6, FFmpeg, and an increasingly concerning amount of GitHub Actions compute time.
 
-It will listen to audio input and produce mesmerizing visuals. Some commands are supported.
+This is a fork of the [projectM SDL2 frontend](https://github.com/projectM-visualizer/frontend-sdl2).
 
-This project is in a bit of a transition state and is in the process of being modernized. There are many rough edges at
-present.
+## Features
+
+- Real-time MilkDrop preset visualization.
+- Native Qt6 control center with a separate visualizer window.
+- FFT-reactive PNG sprites with adjustable position, scale, rotation, opacity, and audio sensitivity.
+- Preset sequencing and timeline-based production.
+- Experimental offline video rendering with FFmpeg.
+- Native system audio capture on macOS 14.4 and newer.
+- A green interface, because blue was deemed insufficiently green.
+
+Development builds: [GitHub Actions](https://github.com/thisis395/projectMSDL-ThisIs395-VJ-Fork/actions). Use the unified suite workflow for downloadable development artifacts. These are not stable releases.
+
+Technical documentation: [Native control center](docs/ThisIs395_Qt_Native_UI.md).
+
+## Developer Disclosure
+
+Development and hands-on testing of the native UI were conducted on Windows 11 26H2, using what the developer considers the shittiest Razer known to mankind.
+
+The developer reserves and exercises his sole and inalienable right to use a Mac 99% of the time. Unfortunately, circumstances involving a raccoon temporarily prevented the exercise of said right.
+
+As a result, Windows was used not out of preference, but out of necessity. The Razer was an unwilling participant. The raccoon has declined to comment.
+
+The use of Windows during development does not constitute an endorsement of Windows.
+
+## Preset Pack Warning: Your SSD May Start Screaming
+
+> [!WARNING]
+> Large MilkDrop/projectM preset collections can contain hundreds of thousands of tiny files. Extracting, copying, scanning, or indexing them can cause prolonged storage activity, high I/O latency, and a temporarily unresponsive system. An SSD is strongly recommended, but even an SSD is not immune to suffering.
+
+For reference, the developer's larger historical collection contained approximately **283,000 files and nearly 28 GB** of presets and textures. File transfers involving this collection took approximately **22 hours on both Windows and macOS**. The older test machine was a 2014 MacBook Pro transferring to a SanDisk Extreme Portable SSD over USB 3.0.
+
+For comparison, nearly 300 GB of other data was restored from that 2014 MacBook Pro to a newer Intel i9 MacBook Pro in just 26 minutes. The preset collection was considerably smaller in bytes, but apparently much larger in emotional damage.
+
+The first projectM GUI launch with the large collection took **28 minutes and 1 second**. A later launch following a cold reboot took approximately 15 seconds. The SSD, according to the developer, was still screaming.
+
+These are historical observations, not controlled benchmarks or guaranteed installation times. The more recent collection contains roughly 135,000 files and occupies around 4 GB uncompressed. Preset counts and sizes vary by pack.
+
+**God help you if you use a Toshitba HDD on USB 2.0.** Between mechanical seek latency, USB 2.0 bandwidth, and hundreds of thousands of small files, the bottleneck may become your remaining natural lifespan. Seriously, use an SSD over USB 3.0 or faster if possible.
+
+### Recommended precautions
+
+- Allow sufficient free space for both the compressed archive and the extracted collection.
+- Start with a smaller preset selection if you do not need the entire library.
+- Avoid extracting or scanning the pack while rendering video, processing audio, or performing other storage-intensive work.
+- If the disk is saturated, let the operation finish. Check storage activity and free space before assuming the application has frozen.
+- If copying the entire collection between computers, consider transferring a single archive and extracting it locally rather than transferring hundreds of thousands of individual files. This does not eliminate the extraction cost.
+- Do not repeatedly force traditional defragmentation on an SSD. Use the operating system's normal SSD optimization facilities.
+
+The sound of an SSD screaming is figurative. If your SSD is literally screaming, please investigate other components before opening a GitHub issue.
+
+**No SSDs were intentionally harmed in the development of ThisIs395 VJ. Unintentional emotional damage remains under investigation.**
+
+## Development Philosophy
+
+- If it compiles, it might work.
+- If it passes CI, it might still not work.
+- If it works on Linux, Windows reserves the right to disagree.
+- If it works on Windows, the sprite might be upside down.
+- If everything works, stop touching it.
+
+## The U L T I M A T E  R E G R E S S I O N™
+
+During development of the native control center, the project exceeded 700 GitHub Actions workflow runs.
+
+The Sprite Manager underwent extensive architectural revisions, texture-loading improvements, IPC repairs, and cross-platform regression testing.
+
+Among the discoveries:
+
+- A successfully created sprite can actually be an invisible 1×1 texture.
+- POCO's default Windows argument parsing can silently ignore the renderer's command-line options.
+- A passing Linux integration test does not constitute proof that Windows works.
+- Vertically flipping an image that does not need to be flipped results in a vertically flipped image.
+
+That last discovery required another cross-platform compilation cycle.
+
+## Apple Silicon
+
+**Planned release note: ADDED APPLE SILICON AT THE EXPENSE OF SILICON.**
+
+Despite being developed with modern macOS support in mind, the initial native macOS builds exclusively targeted Intel processors.
+
+This was not a deliberate preservation initiative for historical computing architectures.
+
+We simply forgot.
+
+Native ARM64 and Intel build jobs now compile the unified executable. The new macOS packaging changes still need a successful CI run and hands-on testing before the release note becomes official.
+
+## Frequently Asked Questions
+
+**Why are there two processes if this is a single application?**
+
+The Qt control center and SDL renderer operate in separate processes launched from the same executable. This keeps their respective event loops and rendering responsibilities isolated.
+
+**Why is the Sprite Manager so extensively tested?**
+
+Historical reasons.
+
+**Why does the repository have so many workflow runs?**
+
+Cross-platform compatibility is important. Apparently, so is heating the atmosphere.
+
+**Does passing CI guarantee that everything works?**
+
+No. We learned this empirically.
+
+**Can I run this on my Intel Mac?**
+
+The intended macOS deployment target is Sequoia 15; the minimum deployment version of the current packaged binaries has not yet been verified. Performance depends on your GPU, rendering resolution, and preset complexity.
+
+**Is Apple Silicon supported?**
+
+A native ARM64 build job exists and has compiled the application; distributable Apple Silicon and Intel bundles are pending packaging verification. Rosetta compatibility has not been formally verified.
+
+## Environmental Impact
+
+No actual environmental impact assessment has been conducted.
+
+However, the maintainers extend their sincerest condolences to the GitHub Actions runners involved in the development of the Sprite Manager.
+
+## Acknowledgments
+
+- The projectM developers.
+- The original MilkDrop developers.
+- The Qt, SDL2, POCO, and FFmpeg communities.
+- GitHub Actions, for its extraordinary patience.
+- Every GPU that participated in testing.
+- The PNG that was eventually rendered correctly (orientation fix pending verification).
+
+---
+
+*ThisIs395 VJ: Making music visible, one regression at a time.*
+
+---
+
+## Building the unified VJ suite
+
+The unified application uses Qt6 Widgets and the projectM 4.2+ SDK. See the [unified suite workflow](.github/workflows/unified-suite.yaml) for the pinned libprojectM revision and platform-specific dependency setup.
+
+For the unified build, configure with `-DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON` in addition to the appropriate CMake dependency paths. FFmpeg is required for offline video export.
+
+The following original upstream build instructions are retained for the standalone SDL frontend.
 
 ## Building from source
 
@@ -158,7 +297,7 @@ cmake --build cmake-build --config Release
 
 #### macOS: Full build from source (including libprojectM)
 
-Pre-built macOS binaries are not currently published. Use the following to build everything from source:
+Development Intel macOS binaries are available through the unified suite workflow; the following instructions build the original standalone frontend from source.
 
 **Prerequisites**
 

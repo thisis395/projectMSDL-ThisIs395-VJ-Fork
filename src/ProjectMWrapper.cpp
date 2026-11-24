@@ -7,12 +7,22 @@
 
 #include <Poco/Delegate.h>
 #include <Poco/File.h>
+#include <Poco/Path.h>
 #include <Poco/NotificationCenter.h>
 
 #include <SDL2/SDL_opengl.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <string>
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+#include <projectM-4/callbacks.h>
+#include <QImageReader>
+#include <QImage>
+#include <QSize>
+#include <QString>
+#endif
 
 const char* ProjectMWrapper::name() const
 {
@@ -66,6 +76,29 @@ void ProjectMWrapper::initialize(Poco::Util::Application& app)
         projectm_set_hard_cut_duration(_projectM, _projectMConfigView->getDouble("hardCutDuration", 20.0));
         projectm_set_hard_cut_sensitivity(_projectM, static_cast<float>(_projectMConfigView->getDouble("hardCutSensitivity", 1.0)));
         projectm_set_beat_sensitivity(_projectM, static_cast<float>(_projectMConfigView->getDouble("beatSensitivity", 1.0)));
+
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+        // Avoid resetting projectM's global texture manager for each PNG.
+        // The callback supplies decoded RGBA pixels for specifically imported
+        // sprites while preserving filesystem fallbacks for preset textures.
+        projectm_set_texture_load_event_callback(
+            _projectM,
+            [](const char* textureName, projectm_texture_load_data* out, void* user) {
+                if (!textureName || !out || !user) return;
+                auto* wrapper = static_cast<ProjectMWrapper*>(user);
+                const auto found = wrapper->_spriteTextureData.find(textureName);
+                if (found == wrapper->_spriteTextureData.end()) return;
+                auto& tex = found->second;
+                if (tex.rgba.empty()) return;
+                out->data = tex.rgba.data();
+                out->width = tex.width;
+                out->height = tex.height;
+                out->channels = 4;
+                out->texture_id = 0;
+                tex.delivered = true;
+            },
+            this);
+#endif
 
         if (!texturePaths.empty())
         {
@@ -145,6 +178,71 @@ projectm_handle ProjectMWrapper::ProjectM() const
 projectm_playlist_handle ProjectMWrapper::Playlist() const
 {
     return _playlist;
+}
+
+bool ProjectMWrapper::PrepareSpriteTexture(const std::string& path, std::string& textureName, std::string& error)
+{
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    // Qt uses native Unicode file paths on Windows, while projectM's generic
+    // stb_image filesystem loader can silently produce a 1x1 placeholder.
+    // Decode once and supply exact RGBA bytes through projectM's texture API.
+    const QString source = QString::fromUtf8(path.c_str());
+    QImageReader reader(source);
+    reader.setAutoTransform(true);
+    const QSize original = reader.size();
+    if (original.isValid() && (original.width() > 4096 || original.height() > 4096))
+        reader.setScaledSize(original.scaled(QSize(4096, 4096), Qt::KeepAspectRatio));
+    QImage image = reader.read();
+    if (image.isNull()) {
+        error = std::string("Qt cannot decode PNG: ") + reader.errorString().toUtf8().toStdString();
+        return false;
+    }
+    if (image.width() <= 0 || image.height() <= 0) {
+        error = "PNG has invalid dimensions";
+        return false;
+    }
+    // MilkdropSprite maps its upper vertices to v=0 and lower vertices to
+    // v=1, matching stb_image's top-first rows. Keep QImage's native row
+    // order; pre-flipping here would display the PNG upside down.
+    image = image.convertToFormat(QImage::Format_RGBA8888);
+    const std::size_t stride = static_cast<std::size_t>(image.width()) * 4;
+    SpriteTextureData tex;
+    tex.width = static_cast<unsigned int>(image.width());
+    tex.height = static_cast<unsigned int>(image.height());
+    tex.rgba.resize(stride * static_cast<std::size_t>(image.height()));
+    for (int row = 0; row < image.height(); ++row)
+        std::memcpy(tex.rgba.data() + row * stride, image.constScanLine(row), stride);
+
+    textureName = "thisis395vj_sprite_" + std::to_string(++_nextSpriteTextureId);
+    _spriteTextureData.emplace(textureName, std::move(tex));
+    return true;
+#else
+    // The original SDL-only executable keeps the existing disk-loading path.
+    const Poco::File file(path);
+    if (!file.exists() || !file.isFile() || !file.canRead()) {
+        error = "PNG file is missing or unreadable";
+        return false;
+    }
+    Poco::Path filePath(path);
+    textureName = filePath.getBaseName();
+    AddSpriteTextureDirectory(filePath.parent().toString());
+    return true;
+#endif
+}
+
+bool ProjectMWrapper::SpriteTextureDelivered(const std::string& textureName) const
+{
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    const auto found = _spriteTextureData.find(textureName);
+    return found != _spriteTextureData.end() && found->second.delivered;
+#else
+    return true;
+#endif
+}
+
+void ProjectMWrapper::ReleaseSpriteTexture(const std::string& textureName)
+{
+    _spriteTextureData.erase(textureName);
 }
 
 void ProjectMWrapper::AddSpriteTextureDirectory(const std::string& directory)

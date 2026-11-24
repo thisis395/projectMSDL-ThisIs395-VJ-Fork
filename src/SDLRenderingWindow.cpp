@@ -14,6 +14,10 @@
 
 #include <SDL2/SDL_opengl.h>
 
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+#include <QImage>
+#endif
+
 const char* SDLRenderingWindow::name() const
 {
     return "SDL2 Rendering Window";
@@ -249,9 +253,19 @@ void SDLRenderingWindow::CreateSDLWindow()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #endif
 
-	SDL_SetHint(SDL_HINT_APP_NAME, "projectM");
+	#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    SDL_SetHint(SDL_HINT_APP_NAME, "ThisIs395 VJ");
+#else
+    SDL_SetHint(SDL_HINT_APP_NAME, "projectM");
+#endif
 	
-    _renderingWindow = SDL_CreateWindow("projectM", left, top, width, height,
+    _renderingWindow = SDL_CreateWindow(
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+        "ThisIs395 VJ - Visualizer",
+#else
+        "projectM",
+#endif
+        left, top, width, height,
                                         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!_renderingWindow)
     {
@@ -259,6 +273,21 @@ void SDLRenderingWindow::CreateSDLWindow()
         poco_fatal(_logger, errorMessage);
         throw Poco::Exception(errorMessage);
     }
+
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    // Use the exact icon shared by the Qt main window and all OS packages.
+    QImage portrait(QStringLiteral(":/thisis395/portrait.png"));
+    if (!portrait.isNull()) {
+        QImage rgba = portrait.convertToFormat(QImage::Format_RGBA8888);
+        SDL_Surface* icon = SDL_CreateRGBSurfaceWithFormatFrom(
+            rgba.bits(), rgba.width(), rgba.height(), 32,
+            rgba.bytesPerLine(), SDL_PIXELFORMAT_RGBA32);
+        if (icon) {
+            SDL_SetWindowIcon(_renderingWindow, icon);
+            SDL_FreeSurface(icon);
+        }
+    }
+#endif
 
     _glContext = SDL_GL_CreateContext(_renderingWindow);
     if (!_glContext)
@@ -268,7 +297,11 @@ void SDLRenderingWindow::CreateSDLWindow()
         throw Poco::Exception(errorMessage);
     }
 
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    SDL_SetWindowTitle(_renderingWindow, "ThisIs395 VJ - Visualizer");
+#else
     SDL_SetWindowTitle(_renderingWindow, "projectM");
+#endif
     SDL_GL_MakeCurrent(_renderingWindow, _glContext);
     UpdateSwapInterval();
 
@@ -391,7 +424,11 @@ void SDLRenderingWindow::UpdateWindowTitleNotificationHandler(POCO_UNUSED const 
 
 void SDLRenderingWindow::UpdateWindowTitle()
 {
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    std::string newTitle = "ThisIs395 VJ - Visualizer";
+#else
     std::string newTitle = "projectM";
+#endif
 
     if (_config->getBool("displayPresetNameInTitle", true))
     {

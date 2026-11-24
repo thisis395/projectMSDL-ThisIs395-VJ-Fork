@@ -1,0 +1,171 @@
+#include "../NativeSpriteManager.h"
+
+#include <QApplication>
+#include <QComboBox>
+#include <QtTest/QTest>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QFileDialog>
+#include <QMetaObject>
+#include <QImage>
+#include <QColor>
+#include <QTemporaryDir>
+#include <QFileInfo>
+#include <QListWidget>
+#include <QLineEdit>
+#include <QPushButton>
+
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+int main(int argc, char* argv[])
+{
+#if defined(Q_OS_LINUX)
+    qputenv("QT_QPA_PLATFORM", "offscreen");
+#endif
+    QApplication app(argc, argv);
+    NativeSpriteManager manager;
+    struct Request { QString action; QJsonObject args; };
+    std::vector<Request> requests;
+    manager.setDispatch([&](const QString& action, const QJsonObject& args) {
+        requests.push_back({action, args});
+    });
+
+    const auto button = [&](const QString& title) -> QPushButton* {
+        for (auto* child : manager.findChildren<QPushButton*>()) {
+            if (child->text() == title)
+                return child;
+        }
+        throw std::runtime_error("Required button missing: " + title.toStdString());
+    };
+    const auto require = [](bool condition, const std::string& why) {
+        if (!condition) throw std::runtime_error(why);
+    };
+
+    auto* add = button(QStringLiteral("Add PNG..."));
+    auto* refresh = button(QStringLiteral("Refresh"));
+    auto* remove = button(QStringLiteral("Remove"));
+    auto* apply = button(QStringLiteral("Apply to live visualizer"));
+
+    require(add->isEnabled(), "Add PNG must be usable before renderer startup");
+    require(refresh->isEnabled(), "Refresh must be usable before renderer startup");
+    require(!remove->isEnabled() && !apply->isEnabled(),
+            "Remove and Apply must wait for sprite selection");
+
+    // Exercise a *real PNG* through Add PNG -> file dialog -> fileSelected,
+    // not just direct dispatch. Earlier CI never clicked the import button.
+    QTemporaryDir working;
+    require(working.isValid(), "Unable to create temporary test folder");
+    const QString pngPath = working.filePath(QStringLiteral("my sprite file.png"));
+    QImage image(32, 32, QImage::Format_RGBA8888);
+    image.fill(QColor(0, 255, 0, 255));
+    require(image.save(pngPath, "PNG"), "Unable to save temporary test PNG");
+
+    add->click();
+    auto* picker = manager.findChild<QFileDialog*>(
+        QStringLiteral("sprite-file-picker"));
+    require(picker != nullptr, "Add PNG button did not open a QFileDialog");
+    picker->selectFile(pngPath);
+    require(QMetaObject::invokeMethod(picker, "accept", Qt::DirectConnection),
+            "QFileDialog accept slot unavailable");
+    require(!requests.empty() && requests.back().action == QStringLiteral("sprite.add"),
+            "Choosing a PNG did not dispatch sprite.add");
+    require(requests.back().args.value(QStringLiteral("path")).toString() == pngPath,
+            "PNG picker lost its original absolute file path");
+
+    auto* library = manager.findChild<QListWidget*>(
+        QStringLiteral("sprite-import-library"));
+    require(library && library->count() == 1,
+            "Selected PNG did not appear in the imported PNG library");
+
+    const auto requestCount = requests.size();
+    refresh->click();
+    require(requests.size() == requestCount + 1 &&
+                requests.back().action == QStringLiteral("sprite.list"),
+            "Refresh button did not dispatch sprite.list");
+    manager.setConnected(true);
+
+    QJsonObject sample{
+        {QStringLiteral("path"), QStringLiteral("/tmp/sample_sprite.png")},
+        {QStringLiteral("x"), 0.5}, {QStringLiteral("y"), 0.5},
+        {QStringLiteral("scale"), 0.25}, {QStringLiteral("opacity"), 1.0},
+        {QStringLiteral("rotationRadians"), 0.0}, {QStringLiteral("gain"), 0.35},
+        {QStringLiteral("audioBand"), 1}};
+    manager.setState(QJsonArray{sample});
+
+    auto* list = manager.findChild<QListWidget*>(QStringLiteral("sprite-live-list"));
+    require(list && list->count() == 1 && list->currentRow() == 0,
+            "Live response did not select loaded sprite");
+    require(remove->isEnabled() && apply->isEnabled(),
+            "Sprite selection did not enable Remove / Apply");
+    manager.show();
+    app.processEvents();
+
+    auto* band = manager.findChild<QComboBox*>(QStringLiteral("sprite-audio-band"));
+    require(band && band->isEnabled(), "Audio-band selector is missing or disabled");
+
+    auto spins = manager.findChildren<QDoubleSpinBox*>();
+    require(spins.size() == 6, "Native scale / position / opacity / gain controls absent");
+    // Regression: the previous implementation cleared and rebuilt the
+    // entire list after each renderer ack, overwriting active text fields.
+    require(!spins[2]->keyboardTracking(),
+            "Scale input must not rewrite partial keystrokes from slider feedback");
+    auto* firstItem = list->item(0);
+    spins[2]->setValue(0.6); // scale is the third numeric control
+    auto* edit = spins[2]->findChild<QLineEdit*>();
+    require(edit != nullptr, "Scale text editor unavailable");
+    edit->setFocus();
+    edit->selectAll();
+    QTest::keyClicks(edit, "1.234");
+    require(edit->text() == QStringLiteral("1.234"), "Physical keyboard text entry failed");
+    for (int i = 0; i < 40; ++i) {
+        auto duplicate = sample;
+        duplicate.insert(QStringLiteral("scale"), 0.25 + i / 1000.0);
+        manager.setState(QJsonArray{duplicate});
+        require(list->item(0) == firstItem,
+                "Incoming sprite state unnecessarily rebuilt the entire list");
+        require(edit->text() == QStringLiteral("1.234"),
+                "Incoming state destroyed partially typed numeric input");
+    }
+    QTest::keyClick(edit, Qt::Key_Return);
+    require(std::abs(spins[2]->value() - 1.234) < 0.001,
+            "Typed number was not committed on Enter");
+    require(!requests.empty() && requests.back().action == QStringLiteral("sprite.update") &&
+                std::abs(requests.back().args.value(QStringLiteral("scale")).toDouble() - 1.234) < 0.001,
+            "Committed typed value never reached the original sprite backend");
+    spins[2]->setValue(0.6);
+    apply->click();
+    require(!requests.empty() && requests.back().action == QStringLiteral("sprite.update"),
+            "Apply button did not dispatch sprite.update");
+    require(std::abs(requests.back().args.value(QStringLiteral("scale")).toDouble() - 0.6) < 1e-6,
+            "Scale control was not included in sprite update");
+    band->setCurrentIndex(3);
+    require(requests.back().action == QStringLiteral("sprite.update") &&
+                requests.back().args.value(QStringLiteral("audioBand")).toInt(-1) == 3,
+            "Treble selection did not reach the renderer-owned sprite manager");
+    band->setCurrentIndex(2);
+    require(requests.back().action == QStringLiteral("sprite.update") &&
+                requests.back().args.value(QStringLiteral("audioBand")).toInt(-1) == 2,
+            "Mids selection did not reach the renderer-owned sprite manager");
+    band->setCurrentIndex(1);
+    require(requests.back().action == QStringLiteral("sprite.update") &&
+                requests.back().args.value(QStringLiteral("audioBand")).toInt(-1) == 1,
+            "Bass selection did not reach the renderer-owned sprite manager");
+
+    remove->click();
+    require(!requests.empty() && requests.back().action == QStringLiteral("sprite.remove") &&
+                requests.back().args.value(QStringLiteral("index")).toInt(-1) == 0,
+            "Remove button did not dispatch selected index");
+    manager.setState(QJsonArray{});
+    require(!remove->isEnabled() && !apply->isEnabled(),
+            "Empty sprite list should disable edit/remove actions");
+
+    manager.setConnected(false);
+    require(add->isEnabled() && refresh->isEnabled(),
+            "Offline state should still allow importing and refreshing");
+    std::cout << "PASS: PNG chooser/import, live controls, real keyboard entry, 40 asynchronous snapshots, and all reactive audio bands\n";
+    return 0;
+}

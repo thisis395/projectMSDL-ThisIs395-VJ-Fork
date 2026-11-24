@@ -12,6 +12,7 @@
 #include <Poco/Util/Application.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -127,50 +128,59 @@ void SpriteManagerWindow::Draw()
     }
 }
 
-void SpriteManagerWindow::AddFile(const std::string& path)
+bool SpriteManagerWindow::AddFile(const std::string& path)
 {
     if (_sprites.size() >= kMaxManagedSprites)
     {
         _status = "The current Sprite Manager supports up to 16 sprites.";
-        return;
+        return false;
     }
 
-    Poco::File file(path);
-    Poco::Path filePath(path);
-
-    if (!file.exists() || !file.isFile() || !file.canRead() ||
-        Poco::icompare(filePath.getExtension(), "png") != 0)
+    const Poco::Path filePath(path);
+    if (Poco::icompare(filePath.getExtension(), "png") != 0)
     {
-        _status = "Please select a readable PNG image.";
-        return;
+        _status = "Please select a PNG image.";
+        return false;
     }
 
-    const std::string textureName = filePath.getBaseName();
     for (const auto& existing : _sprites)
     {
-        if (Poco::icompare(existing.textureName, textureName) == 0)
+        if (existing.path == path)
         {
-            _status = "A sprite with that PNG basename is already loaded; rename one of the files.";
-            return;
+            _status = "This PNG is already loaded into the visualizer.";
+            return false;
         }
     }
 
-    // Texture lookup uses filename stems, so make the selected directory
-    // available before asking libprojectM to create its MilkDrop sprite.
-    _projectMWrapper.AddSpriteTextureDirectory(filePath.parent().toString());
-
     Sprite sprite;
     sprite.path = path;
-    sprite.textureName = textureName;
+    std::string loadError;
+    if (!_projectMWrapper.PrepareSpriteTexture(path, sprite.textureName, loadError))
+    {
+        _status = "PNG import failed: " + loadError;
+        return false;
+    }
 
     if (!CreateSprite(sprite))
     {
-        _status = "libprojectM rejected the sprite. Check the PNG and the application log.";
-        return;
+        _projectMWrapper.ReleaseSpriteTexture(sprite.textureName);
+        _status = "libprojectM rejected the sprite. Check the renderer output.";
+        return false;
+    }
+
+    // A successful sprite ID alone is NOT proof that libprojectM loaded the
+    // selected image; its filesystem fallback may use a blank placeholder.
+    if (!_projectMWrapper.SpriteTextureDelivered(sprite.textureName))
+    {
+        projectm_sprite_destroy(_projectMWrapper.ProjectM(), sprite.id);
+        _projectMWrapper.ReleaseSpriteTexture(sprite.textureName);
+        _status = "projectM did not request the imported PNG pixels. No sprite was added.";
+        return false;
     }
 
     _sprites.push_back(std::move(sprite));
-    _status = "Added sprite. Audio reaction is enabled by default.";
+    _status = "PNG decoded and texture delivered to projectM.";
+    return true;
 }
 
 bool SpriteManagerWindow::CreateSprite(Sprite& sprite)
@@ -222,6 +232,89 @@ void SpriteManagerWindow::RemoveSprite(std::size_t index)
         projectm_sprite_destroy(_projectMWrapper.ProjectM(), _sprites[index].id);
     }
 
+    _projectMWrapper.ReleaseSpriteTexture(_sprites[index].textureName);
     _sprites.erase(_sprites.begin() + static_cast<std::ptrdiff_t>(index));
     _status = "Sprite removed.";
+}
+
+
+std::vector<SpriteManagerWindow::Controls> SpriteManagerWindow::Snapshot() const
+{
+    std::vector<Controls> items;
+    items.reserve(_sprites.size());
+    for (const auto& sprite : _sprites)
+    {
+        items.push_back({sprite.path, sprite.x, sprite.y, sprite.scale,
+                         sprite.opacity, sprite.rotation, sprite.gain, sprite.audioBand});
+    }
+    return items;
+}
+
+bool SpriteManagerWindow::UpdateManagedSprite(std::size_t index, const Controls& settings)
+{
+    if (index >= _sprites.size())
+    {
+        _status = "Sprite no longer exists. Refresh the live list.";
+        return false;
+    }
+    const auto valid = [](float value, float low, float high) {
+        return std::isfinite(value) && value >= low && value <= high;
+    };
+    if (!valid(settings.x, 0.0f, 1.0f) ||
+        !valid(settings.y, 0.0f, 1.0f) ||
+        !valid(settings.scale, 0.02f, 2.0f) ||
+        !valid(settings.opacity, 0.0f, 1.0f) ||
+        !valid(settings.rotation, -3.141593f, 3.141593f) ||
+        !valid(settings.gain, 0.0f, 3.0f) ||
+        settings.audioBand < 0 || settings.audioBand > 3)
+    {
+        _status = "Sprite settings are outside the supported ranges.";
+        return false;
+    }
+
+    Sprite& sprite = _sprites[index];
+    const Sprite previous = sprite;
+    sprite.x = settings.x;
+    sprite.y = settings.y;
+    sprite.scale = settings.scale;
+    sprite.opacity = settings.opacity;
+    sprite.rotation = settings.rotation;
+    sprite.gain = settings.gain;
+
+    if (previous.audioBand != settings.audioBand)
+    {
+        // Band selection is compiled into the MilkDrop expression. Re-create
+        // it on the same render thread rather than mutating expression code.
+        if (sprite.id != 0)
+            projectm_sprite_destroy(_projectMWrapper.ProjectM(), sprite.id);
+        sprite.id = 0;
+        sprite.audioBand = settings.audioBand;
+        if (!CreateSprite(sprite))
+        {
+            sprite = previous;
+            sprite.id = 0; // The old ID was already destroyed.
+            if (!CreateSprite(sprite))
+                _status = "Unable to create sprite; restoring previous audio band also failed.";
+            else
+                _status = "Unable to switch audio band; restored previous settings.";
+            return false;
+        }
+    }
+    else
+    {
+        ApplyVariables(sprite);
+    }
+    _status = "Live sprite settings applied.";
+    return true;
+}
+
+bool SpriteManagerWindow::RemoveManagedSprite(std::size_t index)
+{
+    if (index >= _sprites.size())
+    {
+        _status = "Sprite no longer exists. Refresh the live list.";
+        return false;
+    }
+    RemoveSprite(index);
+    return true;
 }

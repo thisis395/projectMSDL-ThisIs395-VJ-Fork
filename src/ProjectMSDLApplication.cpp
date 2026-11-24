@@ -21,6 +21,11 @@
 ProjectMSDLApplication::ProjectMSDLApplication()
     : Poco::Util::Application()
 {
+    // Qt launches the renderer with --long-option arguments on every OS.
+    // POCO defaults to slash-style options on Windows, silently ignoring
+    // --controlDir and leaving the renderer disconnected from its controller.
+    setUnixOptions(true);
+
     // Note: order here is important, as subsystems are initialized in the same order.
     addSubsystem(new SDLRenderingWindow);
     addSubsystem(new ProjectMWrapper);
@@ -54,7 +59,13 @@ void ProjectMSDLApplication::initialize(Poco::Util::Application& self)
     // So we put command-line overrides just below settings changed in the UI.
     config().add(_commandLineOverrides, PRIO_APPLICATION + 10);
 
+#ifdef THISIS395_VJ_EMBEDDED_RENDERER
+    // Qt and SDL now use the same binary, but preserve the installed
+    // projectMSDL/projectM configuration name and users' existing settings.
+    const std::string configFileName = PROJECTMSDL_INSTALLED_CONFIG_FILE;
+#else
     std::string configFileName = config().getString("application.baseName") + ".properties";
+#endif
     Poco::Path userConfigurationDir = Poco::Path::configHome();
     userConfigurationDir.makeDirectory().append("projectM/");
 
@@ -118,6 +129,10 @@ void ProjectMSDLApplication::defineOptions(Poco::Util::OptionSet& options)
 {
     using Poco::Util::Option;
     using Poco::Util::OptionCallback;
+
+    options.addOption(Option("controlDir", "", "Private local command mailbox directory, supplied by the Qt control center.",
+                             false, "<path>", true)
+                          .binding("native.controlDir", _commandLineOverrides));
 
     options.addOption(Option("help", "h", "Display this help text and exit.")
                           .callback(
