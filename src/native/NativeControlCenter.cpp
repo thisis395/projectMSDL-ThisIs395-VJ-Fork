@@ -16,6 +16,8 @@
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QFileDialog>
 #include <QDialogButtonBox>
 #include <QMetaObject>
@@ -66,6 +68,27 @@ public:
         tabs_ = new QTabWidget(this);
         auto* tabs = tabs_;
         setCentralWidget(tabs);
+
+        // Panic is documentation, not an emergency stop. Keep it available
+        // on every tab and never send a command to the renderer.
+        auto* panic = new QPushButton(QStringLiteral("huh?"), tabs);
+        panic->setObjectName(QStringLiteral("panic-readme"));
+        panic->setAccessibleName(tr("Open project README"));
+        panic->setToolTip(tr("PANIC: read the README. No visualizers will be harmed."));
+        panic->setCursor(Qt::PointingHandCursor);
+        panic->setStyleSheet(QStringLiteral(
+            "QPushButton { background-color: #b91c1c; color: white; "
+            "font-weight: bold; padding: 5px 16px; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #dc2626; }"
+            "QPushButton:pressed { background-color: #991b1b; }"));
+        tabs->setCornerWidget(panic, Qt::TopRightCorner);
+        connect(panic, &QPushButton::clicked, this, [this] {
+            const QUrl readme(QStringLiteral(
+                "https://github.com/thisis395/projectMSDL-ThisIs395-VJ-Fork/blob/feature/qt6-native-control-center/README.md"));
+            if (!QDesktopServices::openUrl(readme))
+                QMessageBox::warning(this, tr("huh?"),
+                    tr("Could not open the README in your browser.\n%1").arg(readme.toString()));
+        });
 
         auto* visualizer = new QWidget;
         auto* visualLayout = new QVBoxLayout(visualizer);
