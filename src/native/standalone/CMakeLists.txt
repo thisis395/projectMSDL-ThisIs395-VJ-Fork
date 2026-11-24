@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 project(ThisIs395VJNative LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets Test)
 if(APPLE)
   add_executable(ThisIs395-VJ-ControlCenter MACOSX_BUNDLE
     ../NativeControlCenter.cpp
@@ -42,5 +42,5 @@ qt_add_resources(ThisIs395-VJ-ControlCenter "thisis395_portrait"
 # exercised by tools/test_native_sprite_ipc.py in the unified Linux workflow.
 enable_testing()
 add_executable(ThisIs395-VJ-SpriteWidgetSmoke SpriteWidgetSmoke.cpp ../NativeSpriteManager.h)
-target_link_libraries(ThisIs395-VJ-SpriteWidgetSmoke PRIVATE Qt6::Widgets)
+target_link_libraries(ThisIs395-VJ-SpriteWidgetSmoke PRIVATE Qt6::Widgets Qt6::Test)
 add_test(NAME NativeSpriteManagerButtons COMMAND ThisIs395-VJ-SpriteWidgetSmoke)
