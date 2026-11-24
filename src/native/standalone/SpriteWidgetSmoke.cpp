@@ -1,6 +1,8 @@
 #include "../NativeSpriteManager.h"
 
 #include <QApplication>
+#include <QComboBox>
+#include <QtTest/QTest>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QFileDialog>
@@ -99,6 +101,11 @@ int main(int argc, char* argv[])
             "Live response did not select loaded sprite");
     require(remove->isEnabled() && apply->isEnabled(),
             "Sprite selection did not enable Remove / Apply");
+    manager.show();
+    app.processEvents();
+
+    auto* band = manager.findChild<QComboBox*>(QStringLiteral("sprite-audio-band"));
+    require(band && band->isEnabled(), "Audio-band selector is missing or disabled");
 
     auto spins = manager.findChildren<QDoubleSpinBox*>();
     require(spins.size() == 6, "Native scale / position / opacity / gain controls absent");
@@ -110,7 +117,10 @@ int main(int argc, char* argv[])
     spins[2]->setValue(0.6); // scale is the third numeric control
     auto* edit = spins[2]->findChild<QLineEdit*>();
     require(edit != nullptr, "Scale text editor unavailable");
-    edit->setText(QStringLiteral("1.234"));
+    edit->setFocus();
+    edit->selectAll();
+    QTest::keyClicks(edit, "1.234");
+    require(edit->text() == QStringLiteral("1.234"), "Physical keyboard text entry failed");
     for (int i = 0; i < 40; ++i) {
         auto duplicate = sample;
         duplicate.insert(QStringLiteral("scale"), 0.25 + i / 1000.0);
@@ -120,12 +130,30 @@ int main(int argc, char* argv[])
         require(edit->text() == QStringLiteral("1.234"),
                 "Incoming state destroyed partially typed numeric input");
     }
+    QTest::keyClick(edit, Qt::Key_Return);
+    require(std::abs(spins[2]->value() - 1.234) < 0.001,
+            "Typed number was not committed on Enter");
+    require(!requests.empty() && requests.back().action == QStringLiteral("sprite.update") &&
+                std::abs(requests.back().args.value(QStringLiteral("scale")).toDouble() - 1.234) < 0.001,
+            "Committed typed value never reached the original sprite backend");
     spins[2]->setValue(0.6);
     apply->click();
     require(!requests.empty() && requests.back().action == QStringLiteral("sprite.update"),
             "Apply button did not dispatch sprite.update");
     require(std::abs(requests.back().args.value(QStringLiteral("scale")).toDouble() - 0.6) < 1e-6,
             "Scale control was not included in sprite update");
+    band->setCurrentIndex(3);
+    require(requests.back().action == QStringLiteral("sprite.update") &&
+                requests.back().args.value(QStringLiteral("audioBand")).toInt(-1) == 3,
+            "Treble selection did not reach the renderer-owned sprite manager");
+    band->setCurrentIndex(2);
+    require(requests.back().action == QStringLiteral("sprite.update") &&
+                requests.back().args.value(QStringLiteral("audioBand")).toInt(-1) == 2,
+            "Mids selection did not reach the renderer-owned sprite manager");
+    band->setCurrentIndex(1);
+    require(requests.back().action == QStringLiteral("sprite.update") &&
+                requests.back().args.value(QStringLiteral("audioBand")).toInt(-1) == 1,
+            "Bass selection did not reach the renderer-owned sprite manager");
 
     remove->click();
     require(!requests.empty() && requests.back().action == QStringLiteral("sprite.remove") &&
@@ -138,6 +166,6 @@ int main(int argc, char* argv[])
     manager.setConnected(false);
     require(add->isEnabled() && refresh->isEnabled(),
             "Offline state should still allow importing and refreshing");
-    std::cout << "PASS: actual PNG chooser/import and library, native sprite buttons, 40 snapshots, typing and scale\n";
+    std::cout << "PASS: PNG chooser/import, live controls, real keyboard entry, 40 asynchronous snapshots, and all reactive audio bands\n";
     return 0;
 }
