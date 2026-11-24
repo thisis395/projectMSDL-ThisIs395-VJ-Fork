@@ -89,6 +89,8 @@ This was not a deliberate preservation initiative for historical computing archi
 
 We simply forgot.
 
+Native ARM64 and Intel build jobs now compile the unified executable. The new macOS packaging changes still need a successful CI run and hands-on testing before the release note becomes official.
+
 ## Frequently Asked Questions
 
 **Why are there two processes if this is a single application?**
@@ -113,7 +115,7 @@ The intended macOS deployment target is Sequoia 15; the minimum deployment versi
 
 **Is Apple Silicon supported?**
 
-Native ARM64 support is planned. Intel builds currently exist, although Rosetta compatibility has not been formally verified.
+A native ARM64 build job exists and has compiled the application; distributable Apple Silicon and Intel bundles are pending packaging verification. Rosetta compatibility has not been formally verified.
 
 ## Environmental Impact
 
