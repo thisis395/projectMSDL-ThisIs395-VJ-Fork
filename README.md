@@ -13,6 +13,7 @@ This is a fork of the [projectM SDL2 frontend](https://github.com/projectM-visua
 - Experimental offline video rendering with FFmpeg.
 - Native system audio capture on macOS 14.4 and newer.
 - A green interface, because blue was deemed insufficiently green.
+- Live mesh X/Y controls under Visualizer → Rendering quality. Apply & save adjusts the running renderer and saves the same user configuration used by the SDL settings UI. The default is 96 × 54; lower values reduce per-point CPU work without reducing the output resolution.
 
 Development builds: [GitHub Actions](https://github.com/thisis395/projectMSDL-ThisIs395-VJ-Fork/actions). Use the unified suite workflow for downloadable development artifacts. These are not stable releases.
 
