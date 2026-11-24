@@ -1,11 +1,110 @@
-# ProjectM SDL2 Frontend
+# ThisIs395 VJ
 
-This is a reference implementation of an application that makes use of the projectM music visualization library.
+A cross-platform, GPU-accelerated music visualization and VJ production suite powered by projectM, SDL2, Qt6, FFmpeg, and an increasingly concerning amount of GitHub Actions compute time.
 
-It will listen to audio input and produce mesmerizing visuals. Some commands are supported.
+This is a fork of the [projectM SDL2 frontend](https://github.com/projectM-visualizer/frontend-sdl2).
 
-This project is in a bit of a transition state and is in the process of being modernized. There are many rough edges at
-present.
+## Features
+
+- Real-time MilkDrop preset visualization.
+- Native Qt6 control center with a separate visualizer window.
+- FFT-reactive PNG sprites with adjustable position, scale, rotation, opacity, and audio sensitivity.
+- Preset sequencing and timeline-based production.
+- Experimental offline video rendering with FFmpeg.
+- Native system audio capture on macOS 14.4 and newer.
+- A green interface, because blue was deemed insufficiently green.
+
+Development builds: [GitHub Actions](https://github.com/thisis395/projectMSDL-ThisIs395-VJ-Fork/actions). Use the unified suite workflow for downloadable development artifacts. These are not stable releases.
+
+Technical documentation: [Native control center](docs/ThisIs395_Qt_Native_UI.md).
+
+## Development Philosophy
+
+- If it compiles, it might work.
+- If it passes CI, it might still not work.
+- If it works on Linux, Windows reserves the right to disagree.
+- If it works on Windows, the sprite might be upside down.
+- If everything works, stop touching it.
+
+## The U L T I M A T E  R E G R E S S I O N™
+
+During development of the native control center, the project exceeded 700 GitHub Actions workflow runs.
+
+The Sprite Manager underwent extensive architectural revisions, texture-loading improvements, IPC repairs, and cross-platform regression testing.
+
+Among the discoveries:
+
+- A successfully created sprite can actually be an invisible 1×1 texture.
+- POCO's default Windows argument parsing can silently ignore the renderer's command-line options.
+- A passing Linux integration test does not constitute proof that Windows works.
+- Vertically flipping an image that does not need to be flipped results in a vertically flipped image.
+
+That last discovery required another cross-platform compilation cycle.
+
+## Apple Silicon
+
+**Planned release note: ADDED APPLE SILICON AT THE EXPENSE OF SILICON.**
+
+Despite being developed with modern macOS support in mind, the initial native macOS builds exclusively targeted Intel processors.
+
+This was not a deliberate preservation initiative for historical computing architectures.
+
+We simply forgot.
+
+## Frequently Asked Questions
+
+**Why are there two processes if this is a single application?**
+
+The Qt control center and SDL renderer operate in separate processes launched from the same executable. This keeps their respective event loops and rendering responsibilities isolated.
+
+**Why is the Sprite Manager so extensively tested?**
+
+Historical reasons.
+
+**Why does the repository have so many workflow runs?**
+
+Cross-platform compatibility is important. Apparently, so is heating the atmosphere.
+
+**Does passing CI guarantee that everything works?**
+
+No. We learned this empirically.
+
+**Can I run this on my Intel Mac?**
+
+The intended macOS deployment target is Sequoia 15; the minimum deployment version of the current packaged binaries has not yet been verified. Performance depends on your GPU, rendering resolution, and preset complexity.
+
+**Is Apple Silicon supported?**
+
+Native ARM64 support is planned. Intel builds currently exist, although Rosetta compatibility has not been formally verified.
+
+## Environmental Impact
+
+No actual environmental impact assessment has been conducted.
+
+However, the maintainers extend their sincerest condolences to the GitHub Actions runners involved in the development of the Sprite Manager.
+
+## Acknowledgments
+
+- The projectM developers.
+- The original MilkDrop developers.
+- The Qt, SDL2, POCO, and FFmpeg communities.
+- GitHub Actions, for its extraordinary patience.
+- Every GPU that participated in testing.
+- The PNG that was eventually rendered correctly (orientation fix pending verification).
+
+---
+
+*ThisIs395 VJ: Making music visible, one regression at a time.*
+
+---
+
+## Building the unified VJ suite
+
+The unified application uses Qt6 Widgets and the projectM 4.2+ SDK. See the [unified suite workflow](.github/workflows/unified-suite.yaml) for the pinned libprojectM revision and platform-specific dependency setup.
+
+For the unified build, configure with `-DENABLE_QT_NATIVE_UI=ON -DENABLE_VJ_SINGLE_BINARY=ON` in addition to the appropriate CMake dependency paths. FFmpeg is required for offline video export.
+
+The following original upstream build instructions are retained for the standalone SDL frontend.
 
 ## Building from source
 
@@ -158,7 +257,7 @@ cmake --build cmake-build --config Release
 
 #### macOS: Full build from source (including libprojectM)
 
-Pre-built macOS binaries are not currently published. Use the following to build everything from source:
+Development Intel macOS binaries are available through the unified suite workflow; the following instructions build the original standalone frontend from source.
 
 **Prerequisites**
 
