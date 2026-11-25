@@ -1,5 +1,8 @@
 #pragma once
 
+#include "../PortableFavorites.h"
+#include <QCoreApplication>
+
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
@@ -56,6 +59,8 @@ public:
         auto* libActions = new QHBoxLayout;
         libActions->addWidget(addPresets);
         libActions->addWidget(toSequence);
+        auto* starPreset = new QPushButton(tr("Star / unstar preset"));
+        libActions->addWidget(starPreset);
         auto* cuePreset = new QPushButton(tr("Cue in live visualizer"));
         libActions->addWidget(cuePreset);
         libLayout->addLayout(libActions);
@@ -67,10 +72,43 @@ public:
         auto* spriteActions = new QHBoxLayout;
         spriteActions->addWidget(addSprites);
         spriteActions->addWidget(spriteToSequence);
+        auto* starSprite = new QPushButton(tr("Star / unstar sprite"));
+        spriteActions->addWidget(starSprite);
         auto* loadLiveSprite = new QPushButton(tr("Load into live Sprite Manager"));
         spriteActions->addWidget(loadLiveSprite);
         libLayout->addLayout(spriteActions);
         pages->addTab(library, tr("Playlist"));
+
+        auto* favorites = new QWidget;
+        auto* favLayout = new QVBoxLayout(favorites);
+        favLayout->addWidget(new QLabel(tr("Portable favorites — actual copies beside the executable.")));
+        auto* refreshFavorites = new QPushButton(tr("Refresh favorites"));
+        favLayout->addWidget(refreshFavorites);
+        favLayout->addWidget(new QLabel(tr("Favorite presets")));
+        favoritePresets_ = new QListWidget;
+        favoritePresets_->setObjectName(QStringLiteral("favorite-presets"));
+        favLayout->addWidget(favoritePresets_, 1);
+        auto* presetActions = new QHBoxLayout;
+        auto* cueFavorite = new QPushButton(tr("Cue favorite"));
+        auto* sequenceFavorite = new QPushButton(tr("Add favorite to sequence +"));
+        auto* removeFavorite = new QPushButton(tr("Unstar preset"));
+        presetActions->addWidget(cueFavorite);
+        presetActions->addWidget(sequenceFavorite);
+        presetActions->addWidget(removeFavorite);
+        favLayout->addLayout(presetActions);
+        favLayout->addWidget(new QLabel(tr("Favorite sprites")));
+        favoriteSprites_ = new QListWidget;
+        favoriteSprites_->setObjectName(QStringLiteral("favorite-sprites"));
+        favLayout->addWidget(favoriteSprites_, 1);
+        auto* favSpriteActions = new QHBoxLayout;
+        auto* loadFavorite = new QPushButton(tr("Load favorite into live Sprite Manager"));
+        auto* sequenceSprite = new QPushButton(tr("Add favorite sprite +"));
+        auto* removeSprite = new QPushButton(tr("Unstar sprite"));
+        favSpriteActions->addWidget(loadFavorite);
+        favSpriteActions->addWidget(sequenceSprite);
+        favSpriteActions->addWidget(removeSprite);
+        favLayout->addLayout(favSpriteActions);
+        pages->addTab(favorites, tr("Favorites"));
 
         auto* sequence = new QWidget;
         auto* seqLayout = new QVBoxLayout(sequence);
@@ -156,6 +194,25 @@ public:
         notice_->setWordWrap(true);
         root->addWidget(notice_);
 
+        connect(starPreset, &QPushButton::clicked, this, [this] { toggleFavorite(presets_, false); });
+        connect(starSprite, &QPushButton::clicked, this, [this] { toggleFavorite(sprites_, true); });
+        connect(removeFavorite, &QPushButton::clicked, this, [this] { toggleFavorite(favoritePresets_, false); });
+        connect(removeSprite, &QPushButton::clicked, this, [this] { toggleFavorite(favoriteSprites_, true); });
+        connect(refreshFavorites, &QPushButton::clicked, this, [this] { reloadFavorites(); });
+        connect(pages, &QTabWidget::currentChanged, this, [this, pages, favorites](int index) {
+            if (pages->widget(index) == favorites) reloadFavorites();
+        });
+        connect(cueFavorite, &QPushButton::clicked, this, [this] {
+            if (favoritePresets_->currentItem() && cueCallback_)
+                cueCallback_(favoritePresets_->currentItem()->text());
+        });
+        connect(loadFavorite, &QPushButton::clicked, this, [this] {
+            if (favoriteSprites_->currentItem() && spriteCallback_)
+                spriteCallback_(favoriteSprites_->currentItem()->text());
+        });
+        connect(sequenceFavorite, &QPushButton::clicked, this, [this] { addClip(favoritePresets_, false); });
+        connect(sequenceSprite, &QPushButton::clicked, this, [this] { addClip(favoriteSprites_, true); });
+        reloadFavorites();
         connect(open, &QPushButton::clicked, this, [this] { openShow(); });
         connect(save, &QPushButton::clicked, this, [this] { saveShow(); });
         connect(addPresets, &QPushButton::clicked, this, [this] {
@@ -213,6 +270,44 @@ private:
     QListWidget* presets_ = nullptr;
     QListWidget* sprites_ = nullptr;
     QListWidget* clips_ = nullptr;
+    QListWidget* favoritePresets_ = nullptr;
+    QListWidget* favoriteSprites_ = nullptr;
+    static PortableFavorites::fs::path favoritePath(const QString& p) {
+        return PortableFavorites::fs::u8path(p.toUtf8().constData());
+    }
+    static PortableFavorites::fs::path favoriteRoot() {
+        return PortableFavorites::rootForExecutable(favoritePath(QCoreApplication::applicationFilePath()));
+    }
+    void reloadFavorites() {
+        try {
+            const auto root = favoriteRoot();
+            PortableFavorites::initialize(root);
+            for (bool sprite : {false, true}) {
+                auto* target = sprite ? favoriteSprites_ : favoritePresets_;
+                const auto paths = PortableFavorites::list(root, sprite);
+                target->clear();
+                for (const auto& path : paths)
+                    target->addItem(QString::fromUtf8(path.u8string().c_str()));
+            }
+        } catch (const std::exception& e) {
+            notice_->setText(tr("Favorites unavailable: %1").arg(QString::fromUtf8(e.what())));
+        }
+    }
+    void toggleFavorite(QListWidget* library, bool sprite) {
+        if (!library->currentItem()) return;
+        try {
+            const auto root = favoriteRoot();
+            const auto source = favoritePath(library->currentItem()->text());
+            const auto copy = PortableFavorites::find(PortableFavorites::list(root, sprite), source);
+            if (copy.empty()) PortableFavorites::add(root, sprite, source);
+            else PortableFavorites::remove(root, sprite, copy);
+            notice_->setText(copy.empty() ? tr("Saved portable favorite copy.") :
+                             tr("Removed favorite copy; external original unchanged."));
+            reloadFavorites();
+        } catch (const std::exception& e) {
+            notice_->setText(tr("Favorite failed: %1").arg(QString::fromUtf8(e.what())));
+        }
+    }
     QDoubleSpinBox* duration_ = nullptr;
     QDoubleSpinBox* fade_ = nullptr;
     QSpinBox *width_ = nullptr, *height_ = nullptr, *fps_ = nullptr, *bitrate_ = nullptr;
