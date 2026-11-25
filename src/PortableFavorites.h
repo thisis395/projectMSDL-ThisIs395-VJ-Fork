@@ -34,6 +34,9 @@ inline bool matchesType(const fs::path& path, bool sprite) {
 }
 
 inline void initialize(const fs::path& root) {
+    if (fs::is_symlink(root) || fs::is_symlink(folder(root, false)) ||
+        fs::is_symlink(folder(root, true)))
+        throw std::runtime_error("Favorite folders cannot be symbolic links.");
     fs::create_directories(folder(root, false));
     fs::create_directories(folder(root, true));
 }
@@ -41,6 +44,8 @@ inline void initialize(const fs::path& root) {
 inline Paths list(const fs::path& root, bool sprite) {
     Paths result;
     const auto dir = folder(root, sprite);
+    if (fs::is_symlink(root) || fs::is_symlink(dir))
+        throw std::runtime_error("Favorite folders cannot be symbolic links.");
     if (!fs::exists(dir)) return result;
     for (const auto& entry : fs::recursive_directory_iterator(dir)) {
         // Do not follow links or treat links to originals as owned copies.
@@ -72,6 +77,8 @@ inline bool sameAsset(const fs::path& a, const fs::path& b) {
 }
 
 inline fs::path find(const Paths& saved, const fs::path& source) {
+    const auto exact = std::find(saved.begin(), saved.end(), source);
+    if (exact != saved.end()) return *exact;
     for (const auto& copy : saved)
         if (copy.filename() == source.filename() && sameAsset(copy, source)) return copy;
     return {};
