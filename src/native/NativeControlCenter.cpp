@@ -355,7 +355,7 @@ public:
         connect(&mailboxPoll_, &QTimer::timeout, this, [this] { readResponse(); });
         mailboxPoll_.setInterval(100);
         connect(&statsPoll_, &QTimer::timeout, this, [this] {
-            if (!rendererReady_ || process_.state() != QProcess::Running ||
+            if (!rendererReady_ || !statsSupported_ || process_.state() != QProcess::Running ||
                 !pendingId_.isEmpty() || !queuedCommands_.isEmpty())
                 return;
             sendCommand(QStringLiteral("render.stats"));
@@ -558,8 +558,22 @@ public:
                     fail("Native mesh default restore did not reach engine");
                     return;
                 }
+                if (display_->count() < 2 || !moveDisplay_->isEnabled()) {
+                    fail("SDL display list or Move control missing");
+                    return;
+                }
+                moveDisplay_->click();
+                phase = 7;
+            } else if (phase == 7 && lastReplyAction_ == QStringLiteral("window.display") &&
+                       pendingId_.isEmpty()) {
+                if (!lastReplyOk_) {
+                    fail("Renderer rejected selected display");
+                    return;
+                }
+                phase = 8;
+            } else if (phase == 8 && fpsLabel_->text() != tr("FPS: —")) {
                 timer->stop();
-                std::cout << "PASS: live mesh Apply/restore, actual Add PNG file picker, decoded PNG texture, "
+                std::cout << "PASS: display picker, measured FPS status bar, live mesh Apply/restore, actual Add PNG file picker, decoded PNG texture, "
                              "Qt live list, numeric Apply, audio-band recompile, Refresh/Remove and renderer IPC" << std::endl;
                 QCoreApplication::exit(0);
             }
@@ -595,6 +609,7 @@ private:
             moveDisplay_->setEnabled(false);
             refreshDisplays_->setEnabled(false);
             fpsLabel_->setText(tr("FPS: —"));
+            statsSupported_ = false;
         }
     }
 
@@ -843,6 +858,7 @@ private:
         if (ok && action == QStringLiteral("ping")) {
             handshakeRetries_ = 0;
             rendererReady_ = true;
+            statsSupported_ = response.contains(QStringLiteral("fps"));
             spriteManager_->setConnected(true);
             refreshDisplays_->setEnabled(response.value(QStringLiteral("displays")).isArray());
             meshApply_->setEnabled(response.contains(QStringLiteral("meshX")) &&
@@ -945,6 +961,7 @@ private:
     QTemporaryDir mailboxDir_;
     QTimer mailboxPoll_;
     QTimer statsPoll_;
+    bool statsSupported_ = false;
     QTimer outputPoll_;
     QByteArray outputBuffer_;
     QString pendingId_;
