@@ -47,6 +47,9 @@ void RenderLoop::Run()
     unsigned frames = 0;
     auto reportStart = Clock::now();
     auto phaseStart = reportStart;
+    auto fpsSampleStart = Clock::now();
+    unsigned fpsSampleFrames = 0;
+    double measuredFps = 0.0;
     auto mark = [&](std::size_t phase) {
         if (!profile) return;
         const auto now = Clock::now();
@@ -62,7 +65,7 @@ void RenderLoop::Run()
         PollEvents();
         CheckViewportSize();
         mark(0);
-        mailbox.poll(_projectMHandle, _playlistHandle, _projectMGui.ManagedSprites());
+        mailbox.poll(_projectMHandle, _playlistHandle, _projectMGui.ManagedSprites(), measuredFps);
         mark(1);
         _audioCapture.FillBuffer();
         mark(2);
@@ -92,6 +95,19 @@ void RenderLoop::Run()
             timings.fill(0.0);
             frames = 0;
             reportStart = Clock::now();
+        }
+
+        // Count completed frames using a high-resolution half-second sample.
+        // Avoid filesystem or logging work on every frame for the status bar.
+        if (mailbox.enabled()) {
+            ++fpsSampleFrames;
+            const auto now = Clock::now();
+            const auto elapsed = std::chrono::duration<double>(now - fpsSampleStart).count();
+            if (elapsed >= 0.5) {
+                measuredFps = fpsSampleFrames / elapsed;
+                fpsSampleFrames = 0;
+                fpsSampleStart = now;
+            }
         }
 
         // Pass projectM the actual FPS value of the last frame.
