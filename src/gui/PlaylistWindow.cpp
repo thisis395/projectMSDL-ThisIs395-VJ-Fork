@@ -1,6 +1,7 @@
 #include "PlaylistWindow.h"
 
 #include "ProjectMWrapper.h"
+#include "PortableFavorites.h"
 #include "imgui.h"
 
 #include <Poco/Util/Application.h>
@@ -28,6 +29,7 @@ PlaylistWindow::PlaylistWindow()
 void PlaylistWindow::Show()
 {
     _visible = true;
+    RefreshFavorites();
 }
 
 void PlaylistWindow::Draw()
@@ -57,6 +59,11 @@ void PlaylistWindow::Draw()
                         DrawSpriteLibraryTab();
                         ImGui::EndTabItem();
                     }
+                    if (ImGui::BeginTabItem("Favorites"))
+                    {
+                        DrawFavoritesTab();
+                        ImGui::EndTabItem();
+                    }
                     ImGui::EndTabBar();
                 }
                 ImGui::EndTabItem();
@@ -80,6 +87,134 @@ void PlaylistWindow::Draw()
         }
     }
     ImGui::End();
+}
+
+namespace {
+PortableFavorites::fs::path favoritesRoot()
+{
+    return PortableFavorites::rootForExecutable(PortableFavorites::fs::u8path(
+        Poco::Util::Application::instance().config().getString("application.path")));
+}
+}
+
+void PlaylistWindow::RefreshFavorites()
+{
+    try
+    {
+        const auto root = favoritesRoot();
+        PortableFavorites::initialize(root);
+        const auto presets = PortableFavorites::list(root, false);
+        const auto sprites = PortableFavorites::list(root, true);
+        _savedPresets.clear();
+        _savedSprites.clear();
+        for (const auto& p : presets) _savedPresets.push_back(p.u8string());
+        for (const auto& p : sprites) _savedSprites.push_back(p.u8string());
+        _favoriteCache.clear();
+    }
+    catch (const std::exception& e)
+    {
+        std::snprintf(_status, sizeof(_status), "Favorites unavailable: %s", e.what());
+    }
+}
+
+bool PlaylistWindow::IsFavorite(const std::string& path, bool sprite)
+{
+    const auto key = std::make_pair(sprite, path);
+    const auto found = _favoriteCache.find(key);
+    if (found != _favoriteCache.end()) return found->second;
+    bool starred = false;
+    try
+    {
+        PortableFavorites::Paths saved;
+        for (const auto& p : (sprite ? _savedSprites : _savedPresets))
+            saved.push_back(PortableFavorites::fs::u8path(p));
+        starred = !PortableFavorites::find(saved, PortableFavorites::fs::u8path(path)).empty();
+    }
+    catch (const std::exception&) {}
+    _favoriteCache.emplace(key, starred);
+    return starred;
+}
+
+void PlaylistWindow::ToggleFavorite(const std::string& path, bool sprite)
+{
+    try
+    {
+        const auto root = favoritesRoot();
+        const auto source = PortableFavorites::fs::u8path(path);
+        const auto existing = PortableFavorites::find(PortableFavorites::list(root, sprite), source);
+        if (existing.empty()) PortableFavorites::add(root, sprite, source);
+        else PortableFavorites::remove(root, sprite, existing);
+        std::snprintf(_status, sizeof(_status), "%s", existing.empty() ?
+                      "Saved portable favorite copy." : "Removed favorite copy; external original unchanged.");
+        RefreshFavorites();
+    }
+    catch (const std::exception& e)
+    {
+        std::snprintf(_status, sizeof(_status), "Favorite failed: %s", e.what());
+    }
+}
+
+void PlaylistWindow::DrawFavoritesTab()
+{
+    if (ImGui::Button("Refresh favorites")) RefreshFavorites();
+    ImGui::SameLine();
+    ImGui::TextDisabled("Copies beside the executable; original files stay untouched.");
+    std::string removePath;
+    bool removeSprite = false;
+    for (bool sprite : {false, true})
+    {
+        ImGui::PushID(sprite ? "favoriteSprites" : "favoritePresets");
+        ImGui::Text("%s (%zu)", sprite ? "Favorite sprites" : "Favorite presets",
+                    (sprite ? _savedSprites : _savedPresets).size());
+        ImGui::BeginChild("Saved", ImVec2(0, 190), true);
+        const auto& saved = sprite ? _savedSprites : _savedPresets;
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(saved.size()));
+        while (clipper.Step())
+        {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+            {
+                const auto& path = saved[static_cast<std::size_t>(i)];
+                ImGui::PushID(i);
+                const auto name = PortableFavorites::fs::u8path(path).filename().u8string();
+                ImGui::TextUnformatted(name.c_str());
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
+                ImGui::SameLine();
+                if (ImGui::SmallButton("+"))
+                {
+                    _sequence.push_back({path, _defaultDuration, _defaultFade, sprite});
+                    std::snprintf(_status, sizeof(_status), "Added favorite to sequence.");
+                }
+                if (!sprite)
+                {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Cue"))
+                    {
+                        auto* playlist = _projectMWrapper.Playlist();
+                        if (playlist)
+                        {
+                            projectm_playlist_add_preset(playlist, path.c_str(), false);
+                            const auto count = projectm_playlist_size(playlist);
+                            for (uint32_t j = 0; j < count; ++j)
+                            {
+                                char* item = projectm_playlist_item(playlist, j);
+                                const bool match = item && path == item;
+                                if (item) projectm_playlist_free_string(item);
+                                if (match) { projectm_playlist_set_position(playlist, j, _hardCut); break; }
+                            }
+                        }
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Unstar")) { removePath = path; removeSprite = sprite; }
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndChild();
+        ImGui::PopID();
+    }
+    if (!removePath.empty()) ToggleFavorite(removePath, removeSprite);
+    if (_status[0]) ImGui::TextWrapped("%s", _status);
 }
 
 void PlaylistWindow::DrawPlaylistTab()
@@ -139,9 +274,9 @@ void PlaylistWindow::DrawPlaylistTab()
             }
             ImGui::SameLine();
             ImGui::PushID(index);
-            if (ImGui::SmallButton(_favorites.count(path) ? "*" : "Star"))
+            if (ImGui::SmallButton(IsFavorite(path, false) ? "*" : "Star"))
             {
-                if (!_favorites.erase(path)) _favorites.insert(path);
+                ToggleFavorite(path, false);
             }
             ImGui::SameLine();
             if (ImGui::SmallButton("+"))
@@ -202,7 +337,7 @@ void PlaylistWindow::DrawPlaylistTab()
         }
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("Changes are in-memory for this session.");
+    ImGui::TextDisabled("Playlist edits are session-only; starred copies are portable.");
     if (_status[0])
     {
         ImGui::TextWrapped("%s", _status);
@@ -282,10 +417,9 @@ void PlaylistWindow::DrawSpriteLibraryTab()
             if (ImGui::Selectable((name + "##sprite").c_str(), _selectedSprite == index))
                 _selectedSprite = index;
             ImGui::SameLine();
-            if (ImGui::SmallButton(_spriteFavorites.count(path) ? "*" : "Star"))
+            if (ImGui::SmallButton(IsFavorite(path, true) ? "*" : "Star"))
             {
-                if (!_spriteFavorites.erase(path))
-                    _spriteFavorites.insert(path);
+                ToggleFavorite(path, true);
             }
             ImGui::SameLine();
             if (ImGui::SmallButton("+"))
@@ -320,7 +454,6 @@ void PlaylistWindow::DrawSpriteLibraryTab()
     if (ImGui::Button("Remove from library") &&
         _selectedSprite >= 0 && static_cast<std::size_t>(_selectedSprite) < _spriteLibrary.size())
     {
-        _spriteFavorites.erase(_spriteLibrary[static_cast<std::size_t>(_selectedSprite)]);
         _spriteLibrary.erase(_spriteLibrary.begin() + _selectedSprite);
         _selectedSprite = -1;
     }
@@ -340,7 +473,7 @@ void PlaylistWindow::DrawSpriteLibraryTab()
         _spriteFolderPath[0] = '\0';
     }
     if (_status[0]) ImGui::TextWrapped("%s", _status);
-    ImGui::TextDisabled("Sprite library is in-memory this session. Sequence sprite playback/rendering is a separate milestone.");
+    ImGui::TextDisabled("Imported library is session-only; starred copies are portable.");
 }
 
 void PlaylistWindow::DrawSequenceTab()

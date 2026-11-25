@@ -18,6 +18,19 @@ Development builds: [GitHub Actions](https://github.com/thisis395/projectMSDL-Th
 
 Technical documentation: [Native control center](docs/ThisIs395_Qt_Native_UI.md).
 
+## Portable favorites
+
+Star presets or PNG sprites in the playlist editor; use the Favorites tab to browse saved copies, cue presets, load sprites (native UI), or add them to sequences. Star/Unstar writes immediately. No entire preset pack is scanned or copied for this feature.
+
+```text
+ThisIs395-VJ.exe (or the Linux executable / macOS projectM.app)
+Favorites/
+  Presets/
+  Sprites/
+```
+
+The files themselves are copied, not shortcuts. Move the Favorites folder alongside your next executable or app bundle. macOS stores it next to the .app, not inside its signed contents. Name collisions retain the original filename in numbered subfolders. Unstarring deletes the saved copy, never the external original; if a show references that copy, keep it starred until the show no longer needs it. Presets may rely on additional texture files: keep their texture collection available when moving the suite. Installed locations without write permissions show a storage error; use a writable portable installation.
+
 ## Developer Disclosure
 
 Development and hands-on testing of the native UI were conducted on Windows 11 26H2, using what the developer considers the shittiest Razer known to mankind.
