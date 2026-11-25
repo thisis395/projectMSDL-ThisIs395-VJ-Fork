@@ -418,18 +418,73 @@ jobs:
           lipo "$APP/Contents/MacOS/projectM" -verify_arch '${{ matrix.arch }}'
           lipo "$APP/Contents/MacOS/projectMSDL-offline" -verify_arch '${{ matrix.arch }}'
           test -f "$APP/Contents/PlugIns/platforms/libqcocoa.dylib"
-          # Sign only after all binaries and Info.plist have been finalized.
+          # macdeployqt can leave the original LC_ID_DYLIB on copied
+          # libraries. otool -L includes that ID as its first entry; it is
+          # not a dependency. Normalize IDs and any remaining absolute loads
+          # that point to a library already present in the bundle, before signing.
+          python - "$APP" '${{ matrix.arch }}' <<'PY'
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          app = pathlib.Path(sys.argv[1])
+          arch = sys.argv[2]
+          frameworks = app / "Contents" / "Frameworks"
+          runner_prefixes = ("/opt/homebrew/", "/usr/local/", "/Users/runner/")
+          def run(*args):
+              return subprocess.check_output([str(a) for a in args], text=True)
+
+          binaries = [
+              p for p in (app / "Contents").rglob("*")
+              if p.is_file() and not p.is_symlink() and "Mach-O" in run("file", "-b", p)
+          ]
+
+          def commands(binary):
+              # Inspect actual load commands, not the combined otool -L list.
+              command = None
+              for line in run("otool", "-arch", arch, "-l", binary).splitlines():
+                  line = line.strip()
+                  if line.startswith("cmd "):
+                      command = line.split()[1]
+                  elif command and (
+                      line.startswith("name ") or line.startswith("path ")
+                  ):
+                      value = re.sub(r" \(offset \d+\)$", "", line.split(" ", 1)[1])
+                      yield command, value
+                      command = None
+
+          loads = {"LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB",
+                   "LC_LOAD_UPWARD_DYLIB", "LC_LAZY_LOAD_DYLIB"}
+
+          for binary in binaries:
+              subprocess.check_call(["lipo", str(binary), "-verify_arch", arch])
+              for command, value in list(commands(binary)):
+                  if command == "LC_ID_DYLIB" and value.startswith(runner_prefixes):
+                      if not binary.is_relative_to(frameworks):
+                          raise SystemExit(f"Unexpected external install ID: {binary}: {value}")
+                      new_id = "@rpath/" + binary.relative_to(frameworks).as_posix()
+                      subprocess.check_call(["install_name_tool", "-id", new_id, str(binary)])
+                  elif command in loads and value.startswith(runner_prefixes):
+                      parts = pathlib.PurePosixPath(value).parts
+                      framework = next((i for i, part in enumerate(parts)
+                                        if part.endswith(".framework")), None)
+                      rel = pathlib.Path(*parts[framework:]) if framework is not None else pathlib.Path(parts[-1])
+                      target = frameworks / rel
+                      if not target.is_file() or not target.resolve().is_relative_to(frameworks.resolve()):
+                          raise SystemExit(f"Unbundled dependency in {binary}: {value}")
+                      new_load = "@executable_path/../Frameworks/" + rel.as_posix()
+                      subprocess.check_call(["install_name_tool", "-change", value, new_load, str(binary)])
+
+          # Keep the dependency gate strict; do not distribute runner-linked code.
+          for binary in binaries:
+              for command, value in commands(binary):
+                  if (command in loads or command == "LC_ID_DYLIB") and value.startswith(runner_prefixes):
+                      raise SystemExit(f"External Mach-O reference in {binary}: {value}")
+          PY
+          # Sign only after all binary changes and Info.plist are finalized.
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          # Check all shipped Mach-O files for direct references to the runner.
-          while IFS= read -r -d '' binary; do
-            if file -b "$binary" | grep -q 'Mach-O'; then
-              if otool -L "$binary" | tail -n +2 | grep -E '^[[:space:]]+(/opt/homebrew/|/usr/local/|/Users/runner/)'; then
-                echo "Unbundled dependency in $binary"
-                exit 1
-              fi
-            fi
-          done < <(find "$APP/Contents" -type f -print0)
           probe_dir="$RUNNER_TEMP/VJ mailbox parser probe"
           mkdir -p "$probe_dir"
           "$APP/Contents/MacOS/projectM" --vj-renderer-probe --controlDir "$probe_dir"
