@@ -47,3 +47,7 @@ enable_testing()
 add_executable(ThisIs395-VJ-SpriteWidgetSmoke SpriteWidgetSmoke.cpp ../NativeSpriteManager.h)
 target_link_libraries(ThisIs395-VJ-SpriteWidgetSmoke PRIVATE Qt6::Widgets Qt6::Test)
 add_test(NAME NativeSpriteManagerButtons COMMAND ThisIs395-VJ-SpriteWidgetSmoke)
+
+# Shared dependency-free portable favorites regression test.
+add_executable(ThisIs395-VJ-PortableFavoritesTest ../../../test/PortableFavoritesTest.cpp)
+add_test(NAME PortableFavorites COMMAND ThisIs395-VJ-PortableFavoritesTest)
