@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <set>
+#include <map>
 #include <string>
 #include <vector>
 #include <SDL2/SDL.h>
@@ -19,6 +19,10 @@ public:
 
 private:
     void DrawPlaylistTab();
+    void DrawFavoritesTab();
+    void RefreshFavorites();
+    bool IsFavorite(const std::string& path, bool sprite);
+    void ToggleFavorite(const std::string& path, bool sprite);
     void DrawSpriteLibraryTab();
     void ImportSpriteLibraryPath(const std::string& path, bool directory);
     void DrawExportTab();
@@ -46,7 +50,8 @@ private:
     int _selected{-1};
     int _selectedSprite{-1};
     std::vector<std::string> _spriteLibrary;
-    std::set<std::string> _spriteFavorites;
+    std::vector<std::string> _savedPresets, _savedSprites;
+    std::map<std::pair<bool, std::string>, bool> _favoriteCache;
     char _spriteLibraryPath[2048]{};
     char _spriteFolderPath[2048]{};
     bool _hardCut{false};
@@ -55,7 +60,6 @@ private:
     char _spritePath[2048]{};
     char _exportPath[2048]{};
     std::vector<SequenceClip> _sequence;
-    std::set<std::string> _favorites;
     float _defaultDuration{30.0f};
     float _defaultFade{3.0f};
     std::size_t _sequencePosition{0};
