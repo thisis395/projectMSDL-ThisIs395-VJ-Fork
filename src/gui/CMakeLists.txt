@@ -45,6 +45,8 @@ add_library(ProjectMSDL-GUI STATIC
         ToastMessage.h
         )
 
+target_compile_features(ProjectMSDL-GUI PUBLIC cxx_std_17)
+
 target_compile_definitions(ProjectMSDL-GUI
         PRIVATE
         PROJECTMSDL_VERSION="${PROJECT_VERSION}"
