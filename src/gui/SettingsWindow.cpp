@@ -151,7 +151,7 @@ void SettingsWindow::DrawProjectMSettingsTab()
             ImGui::TableNextRow();
             LabelWithTooltip("Per-Point Mesh Size X/Y",
                              "Size of the per-point transformation grid.\nHigher values produce better quality, but require exponentially more CPU time to calculate.\nMilkdrop's default is 48x32.");
-            IntegerSettingVec("projectM.meshX", "projectM.meshY", 64, 48, 8, 300);
+            IntegerSettingVec("projectM.meshX", "projectM.meshY", 96, 54, 8, 300);
 
             ImGui::EndTable();
         }

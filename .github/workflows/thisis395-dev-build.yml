@@ -1,0 +1,10 @@
+# Compatibility entry point for the superseded unsigned development workflow.
+# Keep a manual trigger without running a second, obsolete build matrix on every push.
+name: ThisIs395 VJ - Unsigned Development Builds
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unified:
+    uses: ./.github/workflows/unified-suite.yaml

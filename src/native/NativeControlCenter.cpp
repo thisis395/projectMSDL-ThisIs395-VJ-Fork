@@ -44,6 +44,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QSettings>
+#include <QStatusBar>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -139,8 +140,76 @@ public:
         form->addRow(tr("Texture folder"), browseRow(texturePath_, true));
         form->addRow(tr("Width"), width_);
         form->addRow(tr("Height"), height_);
+        auto* displayRow = new QWidget;
+        auto* displayLayout = new QHBoxLayout(displayRow);
+        displayLayout->setContentsMargins(0, 0, 0, 0);
+        display_ = new QComboBox;
+        display_->setObjectName(QStringLiteral("visualizer-display"));
+        display_->addItem(tr("Automatic / OS default"), 0);
+        displayLayout->addWidget(display_, 1);
+        moveDisplay_ = new QPushButton(tr("Move"));
+        moveDisplay_->setObjectName(QStringLiteral("display-move"));
+        moveDisplay_->setEnabled(false);
+        displayLayout->addWidget(moveDisplay_);
+        refreshDisplays_ = new QPushButton(tr("Refresh"));
+        refreshDisplays_->setEnabled(false);
+        displayLayout->addWidget(refreshDisplays_);
+        connect(display_, &QComboBox::currentIndexChanged, this, [this](int) {
+            moveDisplay_->setEnabled(rendererReady_ && display_->currentData().toInt() > 0);
+        });
+        connect(moveDisplay_, &QPushButton::clicked, this, [this] {
+            const int display = display_->currentData().toInt();
+            if (display > 0)
+                sendCommand(QStringLiteral("window.display"), QString(),
+                    QJsonObject{{QStringLiteral("display"), display}});
+        });
+        connect(refreshDisplays_, &QPushButton::clicked, this, [this] {
+            sendCommand(QStringLiteral("window.displays"));
+        });
+        form->addRow(tr("Display"), displayRow);
         form->addRow(fullscreen_);
         visualLayout->addWidget(launchSettings);
+
+        auto* meshGroup = new QGroupBox(tr("Rendering quality"));
+        auto* meshForm = new QFormLayout(meshGroup);
+        auto* meshRow = new QWidget;
+        auto* meshLayout = new QHBoxLayout(meshRow);
+        meshLayout->setContentsMargins(0, 0, 0, 0);
+        meshX_ = new QSpinBox;
+        meshY_ = new QSpinBox;
+        meshX_->setObjectName(QStringLiteral("mesh-x"));
+        meshY_->setObjectName(QStringLiteral("mesh-y"));
+        meshX_->setAccessibleName(tr("Mesh width"));
+        meshY_->setAccessibleName(tr("Mesh height"));
+        for (auto* box : {meshX_, meshY_}) {
+            box->setRange(8, 300);
+            box->setToolTip(tr("Per-point transformation grid; higher values cost more CPU time. Not the output resolution."));
+        }
+        meshX_->setValue(96);
+        meshY_->setValue(54);
+        meshLayout->addWidget(meshX_);
+        meshLayout->addWidget(new QLabel(QStringLiteral("×")));
+        meshLayout->addWidget(meshY_);
+        auto* resetMesh = new QPushButton(tr("Default"));
+        connect(resetMesh, &QPushButton::clicked, this, [this] {
+            meshX_->setValue(96);
+            meshY_->setValue(54);
+        });
+        meshLayout->addWidget(resetMesh);
+        meshApply_ = new QPushButton(tr("Apply & save"));
+        meshApply_->setObjectName(QStringLiteral("mesh-apply"));
+        meshApply_->setEnabled(false);
+        connect(meshApply_, &QPushButton::clicked, this, [this] {
+            sendCommand(QStringLiteral("render.mesh"), QString(),
+                QJsonObject{{QStringLiteral("meshX"), meshX_->value()},
+                            {QStringLiteral("meshY"), meshY_->value()}});
+        });
+        meshLayout->addWidget(meshApply_);
+        meshForm->addRow(tr("Mesh X / Y"), meshRow);
+        auto* meshHelp = new QLabel(tr("96 × 54 recommended. Launch the visualizer, then apply changes live. Lower values can improve FPS."));
+        meshHelp->setWordWrap(true);
+        meshForm->addRow(meshHelp);
+        visualLayout->addWidget(meshGroup);
 
         auto* controls = new QHBoxLayout;
         start_ = new QPushButton(tr("Pop out visualizer"));
@@ -179,6 +248,11 @@ public:
         connect(shuffle, &QPushButton::clicked, this, [this] { sendCommand(QStringLiteral("shuffle")); });
         connect(lock, &QPushButton::clicked, this, [this] { sendCommand(QStringLiteral("lock")); });
 
+        fpsLabel_ = new QLabel(tr("FPS: —"));
+        fpsLabel_->setObjectName(QStringLiteral("renderer-fps"));
+        fpsLabel_->setMinimumWidth(110);
+        fpsLabel_->setToolTip(tr("Measured renderer frame rate, including frame pacing and buffer swaps."));
+        statusBar()->addPermanentWidget(fpsLabel_);
         status_ = new QLabel(tr("Visualizer not running"));
         visualLayout->addWidget(status_);
         output_ = new QPlainTextEdit;
@@ -280,6 +354,14 @@ public:
                 });
         connect(&mailboxPoll_, &QTimer::timeout, this, [this] { readResponse(); });
         mailboxPoll_.setInterval(100);
+        connect(&statsPoll_, &QTimer::timeout, this, [this] {
+            if (!rendererReady_ || !statsSupported_ || process_.state() != QProcess::Running ||
+                !pendingId_.isEmpty() || !queuedCommands_.isEmpty())
+                return;
+            sendCommand(QStringLiteral("render.stats"));
+        });
+        statsPoll_.setInterval(1000);
+        statsPoll_.start();
         restoreSettings();
     }
 
@@ -452,8 +534,46 @@ public:
             } else if (phase == 4 && lastReplyAction_ == QStringLiteral("sprite.remove") &&
                        pendingId_.isEmpty() && spriteManager_->currentState().isEmpty() &&
                        list->count() == 0) {
+                if (!meshApply_->isEnabled()) {
+                    fail("Mesh control not enabled after renderer handshake");
+                    return;
+                }
+                meshX_->setValue(48);
+                meshY_->setValue(32);
+                meshApply_->click();
+                phase = 5;
+            } else if (phase == 5 && lastReplyAction_ == QStringLiteral("render.mesh") &&
+                       pendingId_.isEmpty()) {
+                if (!lastReplyOk_ || lastMeshX_ != 48 || lastMeshY_ != 32) {
+                    fail("Native mesh control did not change actual engine mesh");
+                    return;
+                }
+                meshX_->setValue(96);
+                meshY_->setValue(54);
+                meshApply_->click();
+                phase = 6;
+            } else if (phase == 6 && lastReplyAction_ == QStringLiteral("render.mesh") &&
+                       pendingId_.isEmpty()) {
+                if (!lastReplyOk_ || lastMeshX_ != 96 || lastMeshY_ != 54) {
+                    fail("Native mesh default restore did not reach engine");
+                    return;
+                }
+                if (display_->count() < 2 || !moveDisplay_->isEnabled()) {
+                    fail("SDL display list or Move control missing");
+                    return;
+                }
+                moveDisplay_->click();
+                phase = 7;
+            } else if (phase == 7 && lastReplyAction_ == QStringLiteral("window.display") &&
+                       pendingId_.isEmpty()) {
+                if (!lastReplyOk_) {
+                    fail("Renderer rejected selected display");
+                    return;
+                }
+                phase = 8;
+            } else if (phase == 8 && fpsLabel_->text() != tr("FPS: —")) {
                 timer->stop();
-                std::cout << "PASS: actual Add PNG file picker, decoded PNG texture, "
+                std::cout << "PASS: display picker, measured FPS status bar, live mesh Apply/restore, actual Add PNG file picker, decoded PNG texture, "
                              "Qt live list, numeric Apply, audio-band recompile, Refresh/Remove and renderer IPC" << std::endl;
                 QCoreApplication::exit(0);
             }
@@ -484,6 +604,13 @@ private:
     {
         start_->setEnabled(!running);
         stop_->setEnabled(running);
+        if (!running) {
+            meshApply_->setEnabled(false);
+            moveDisplay_->setEnabled(false);
+            refreshDisplays_->setEnabled(false);
+            fpsLabel_->setText(tr("FPS: —"));
+            statsSupported_ = false;
+        }
     }
 
     void launchVisualizer()
@@ -519,6 +646,8 @@ private:
         args << QStringLiteral("--controlDir") << mailboxDir_.path();
         args << QStringLiteral("--width") << QString::number(width_->value());
         args << QStringLiteral("--height") << QString::number(height_->value());
+        if (display_->currentData().toInt() > 0)
+            args << QStringLiteral("--monitor") << QString::number(display_->currentData().toInt());
         args << QStringLiteral("--fullscreen") << (fullscreen_->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         output_->clear();
         process_.setProgram(executable);
@@ -638,7 +767,8 @@ private:
                 spriteManager_->setStatus(tr("Unable to write live sprite command."));
             return;
         }
-        status_->setText(tr("Sent %1; awaiting renderer.").arg(action));
+        if (action != QStringLiteral("render.stats"))
+            status_->setText(tr("Sent %1; awaiting renderer.").arg(action));
     }
 
     void sendNextQueuedCommand()
@@ -662,6 +792,7 @@ private:
         if (!file.open(QIODevice::ReadOnly)) {
             if (!pendingId_.isEmpty() && pendingElapsed_.isValid() &&
                 pendingElapsed_.elapsed() > 5000) {
+                const bool wasStats = pendingAction_ == QStringLiteral("render.stats");
                 const bool wasSpriteCommand = pendingAction_.startsWith(QStringLiteral("sprite."));
                 const bool wasHandshake = pendingAction_ == QStringLiteral("ping");
                 const QString failedSpritePath = pendingSpritePath_;
@@ -670,9 +801,14 @@ private:
                 pendingAction_.clear();
                 // Preserve queued PNG imports across startup ping retries.
                 // A timed-out transform has unknown state, so discard those.
-                if (!wasHandshake)
+                if (!wasHandshake && !wasStats)
                     queuedCommands_.clear();
                 QFile::remove(mailboxDir_.filePath(QStringLiteral("command.json")));
+                if (wasStats) {
+                    fpsLabel_->setText(tr("FPS: —"));
+                    sendNextQueuedCommand();
+                    return;
+                }
                 status_->setText(tr("Renderer did not respond within 5 seconds."));
                 if (wasSpriteCommand) {
                     spriteManager_->setStatus(tr("Sprite command timed out. Check the visualizer log."));
@@ -709,13 +845,50 @@ private:
         pendingId_.clear();
         pendingAction_.clear();
         const bool ok = response.value(QStringLiteral("ok")).toBool();
+        if (action == QStringLiteral("render.stats")) {
+            const double fps = response.value(QStringLiteral("fps")).toDouble();
+            fpsLabel_->setText(ok && fps > 0
+                ? tr("FPS: %1").arg(fps, 0, 'f', 1) : tr("FPS: —"));
+            sendNextQueuedCommand();
+            return;
+        }
         lastReplyAction_ = action;
         lastReplyOk_ = ok;
         lastRendererSpriteCount_ = response.value(QStringLiteral("activeSpriteCount")).toInt(-1);
         if (ok && action == QStringLiteral("ping")) {
             handshakeRetries_ = 0;
             rendererReady_ = true;
+            statsSupported_ = response.contains(QStringLiteral("fps"));
             spriteManager_->setConnected(true);
+            refreshDisplays_->setEnabled(response.value(QStringLiteral("displays")).isArray());
+            meshApply_->setEnabled(response.contains(QStringLiteral("meshX")) &&
+                                   response.contains(QStringLiteral("meshY")));
+        }
+        if (ok && response.value(QStringLiteral("displays")).isArray()) {
+            const int current = response.value(QStringLiteral("display")).toInt();
+            display_->clear();
+            display_->addItem(tr("Automatic / OS default"), 0);
+            for (const auto& value : response.value(QStringLiteral("displays")).toArray()) {
+                const auto monitor = value.toObject();
+                const int index = monitor.value(QStringLiteral("index")).toInt();
+                QString label = tr("%1: %2 (%3 × %4)")
+                    .arg(index).arg(monitor.value(QStringLiteral("name")).toString())
+                    .arg(monitor.value(QStringLiteral("width")).toInt())
+                    .arg(monitor.value(QStringLiteral("height")).toInt());
+                const int hz = monitor.value(QStringLiteral("refresh")).toInt();
+                if (hz > 0) label += tr(" · %1 Hz").arg(hz);
+                display_->addItem(label, index);
+            }
+            display_->setCurrentIndex(qMax(0, display_->findData(current)));
+            moveDisplay_->setEnabled(rendererReady_ && current > 0);
+            if (action == QStringLiteral("window.display")) saveSettings();
+        }
+        if (ok && (action == QStringLiteral("ping") || action == QStringLiteral("render.mesh")) &&
+            response.contains(QStringLiteral("meshX")) && response.contains(QStringLiteral("meshY"))) {
+            lastMeshX_ = response.value(QStringLiteral("meshX")).toInt();
+            lastMeshY_ = response.value(QStringLiteral("meshY")).toInt();
+            meshX_->setValue(lastMeshX_);
+            meshY_->setValue(lastMeshY_);
         }
         if (ok && response.value(QStringLiteral("sprites")).isArray()) {
             // Defer a state refresh until all pending slider edits have landed.
@@ -734,6 +907,10 @@ private:
                 .arg(response.value(QStringLiteral("presetIndex")).toInt())
                 .arg(response.value(QStringLiteral("shuffle")).toBool() ? tr("on") : tr("off"))
                 .arg(response.value(QStringLiteral("locked")).toBool() ? tr("yes") : tr("no")));
+            if (action == QStringLiteral("window.display"))
+                status_->setText(tr("Visualizer moved to display %1.").arg(display_->currentData().toInt()));
+            if (action == QStringLiteral("render.mesh"))
+                status_->setText(tr("Live mesh applied and saved: %1 × %2").arg(lastMeshX_).arg(lastMeshY_));
             if (action == QStringLiteral("sprite.update"))
                 spriteManager_->setStatus(tr("Live sprite settings applied."));
             else if (action == QStringLiteral("sprite.add"))
@@ -759,6 +936,11 @@ private:
         width_->setValue(s.value(QStringLiteral("width"), 1280).toInt());
         height_->setValue(s.value(QStringLiteral("height"), 720).toInt());
         fullscreen_->setChecked(s.value(QStringLiteral("fullscreen"), false).toBool());
+        const int savedDisplay = s.value(QStringLiteral("display"), 0).toInt();
+        if (savedDisplay > 0) {
+            display_->addItem(tr("Previously selected display %1").arg(savedDisplay), savedDisplay);
+            display_->setCurrentIndex(display_->count() - 1);
+        }
         restoreGeometry(s.value(QStringLiteral("geometry")).toByteArray());
     }
 
@@ -771,12 +953,15 @@ private:
         s.setValue(QStringLiteral("width"), width_->value());
         s.setValue(QStringLiteral("height"), height_->value());
         s.setValue(QStringLiteral("fullscreen"), fullscreen_->isChecked());
+        s.setValue(QStringLiteral("display"), display_->currentData().toInt());
         s.setValue(QStringLiteral("geometry"), saveGeometry());
     }
 
     QProcess process_;
     QTemporaryDir mailboxDir_;
     QTimer mailboxPoll_;
+    QTimer statsPoll_;
+    bool statsSupported_ = false;
     QTimer outputPoll_;
     QByteArray outputBuffer_;
     QString pendingId_;
@@ -795,7 +980,16 @@ private:
     QLineEdit* texturePath_ = nullptr;
     QSpinBox* width_ = nullptr;
     QSpinBox* height_ = nullptr;
+    QSpinBox* meshX_ = nullptr;
+    QSpinBox* meshY_ = nullptr;
+    QPushButton* meshApply_ = nullptr;
+    int lastMeshX_ = -1;
+    int lastMeshY_ = -1;
     QCheckBox* fullscreen_ = nullptr;
+    QComboBox* display_ = nullptr;
+    QPushButton* moveDisplay_ = nullptr;
+    QPushButton* refreshDisplays_ = nullptr;
+    QLabel* fpsLabel_ = nullptr;
     QPushButton* start_ = nullptr;
     QPushButton* stop_ = nullptr;
     QLabel* status_ = nullptr;

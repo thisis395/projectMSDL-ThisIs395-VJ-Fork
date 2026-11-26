@@ -13,6 +13,9 @@ This is a fork of the [projectM SDL2 frontend](https://github.com/projectM-visua
 - Experimental offline video rendering with FFmpeg.
 - Native system audio capture on macOS 14.4 and newer.
 - A green interface, because blue was deemed insufficiently green.
+- Display selection in the Visualizer launch settings, with SDL-reported monitor names, resolution and refresh rate. Move switches the running visualizer to the selected monitor and attempts to preserve fullscreen; Refresh updates the list after display changes. The chosen monitor is remembered for future launches.
+- Persistent bottom status-bar FPS readout, measured from completed frames and refreshed once per second while the renderer is connected.
+- Live mesh X/Y controls under Visualizer → Rendering quality. Apply & save adjusts the running renderer and saves the same user configuration used by the SDL settings UI. The default is 96 × 54; lower values reduce per-point CPU work without reducing the output resolution.
 
 Development builds: [GitHub Actions](https://github.com/thisis395/projectMSDL-ThisIs395-VJ-Fork/actions). Use the unified suite workflow for downloadable development artifacts. These are not stable releases.
 

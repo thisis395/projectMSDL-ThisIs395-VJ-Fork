@@ -22,6 +22,7 @@
 #include "notifications/PlaybackControlNotification.h"
 #include "gui/SpriteManagerWindow.h"
 #include "SDLRenderingWindow.h"
+#include "ProjectMSDLApplication.h"
 
 // Local-only, single-inflight v1 command mailbox. Called exclusively on the SDL
 // render thread, so libprojectM calls never race against rendering.
@@ -32,7 +33,7 @@ public:
 
     bool enabled() const { return !directory_.empty(); }
 
-    void poll(projectm_handle renderer, projectm_playlist_handle playlist, SpriteManagerWindow& sprites) {
+    void poll(projectm_handle renderer, projectm_playlist_handle playlist, SpriteManagerWindow& sprites, double measuredFps) {
         if (!enabled() || !renderer || !playlist) return;
         Poco::Path input(directory_);
         input.append("command.json");
@@ -72,6 +73,27 @@ public:
                 post(PlaybackControlNotification::Action::ToggleShuffle);
             } else if (action == "lock") {
                 post(PlaybackControlNotification::Action::TogglePresetLocked);
+            } else if (action == "render.stats" || action == "window.displays") {
+                // Read-only telemetry, separate from sprite snapshots.
+            } else if (action == "window.display") {
+                auto& window = Poco::Util::Application::instance().getSubsystem<SDLRenderingWindow>();
+                const int display = request->getValue<int>("display") - 1;
+                SDL_Window* handle = window.GetRenderingWindow();
+                if (!handle || display < 0 || display >= SDL_GetNumVideoDisplays())
+                    throw Poco::InvalidArgumentException("Selected display is unavailable");
+                if (SDL_GetWindowDisplayIndex(handle) != display) {
+                    const bool fullscreen = (SDL_GetWindowFlags(handle) & SDL_WINDOW_FULLSCREEN) != 0;
+                    if (fullscreen) window.Windowed();
+                    if (SDL_GetWindowFlags(handle) & SDL_WINDOW_FULLSCREEN)
+                        throw Poco::InvalidArgumentException("Could not leave fullscreen");
+                    SDL_SetWindowPosition(handle, SDL_WINDOWPOS_CENTERED_DISPLAY(display),
+                                          SDL_WINDOWPOS_CENTERED_DISPLAY(display));
+                    if (fullscreen) window.Fullscreen();
+                    if (SDL_GetWindowDisplayIndex(handle) != display)
+                        throw Poco::InvalidArgumentException("Window did not reach the selected display");
+                    if (fullscreen && !(SDL_GetWindowFlags(handle) & SDL_WINDOW_FULLSCREEN))
+                        throw Poco::InvalidArgumentException("Moved display but could not restore fullscreen");
+                }
             } else if (action == "window.focus") {
                 SDL_Window* window = Poco::Util::Application::instance()
                     .getSubsystem<SDLRenderingWindow>().GetRenderingWindow();
@@ -83,6 +105,21 @@ public:
                     .getSubsystem<SDLRenderingWindow>().GetRenderingWindow();
                 if (!window) throw Poco::InvalidArgumentException("Visualizer window is unavailable");
                 SDL_HideWindow(window);
+            } else if (action == "render.mesh") {
+                const int x = request->getValue<int>("meshX");
+                const int y = request->getValue<int>("meshY");
+                if (x < 8 || x > 300 || y < 8 || y > 300)
+                    throw Poco::InvalidArgumentException("Mesh dimensions must be between 8 and 300");
+                auto& app = ProjectMSDLApplication::instance();
+                auto config = app.UserConfiguration();
+                const auto file = app.CommandLineConfiguration()->getString("app.UserConfigurationFile", "");
+                if (file.empty())
+                    throw Poco::InvalidArgumentException("User configuration file is unavailable");
+                // Apply on the render thread through the existing configuration
+                // event handlers; use the same settings as the SDL UI.
+                config->setInt("projectM.meshX", x);
+                config->setInt("projectM.meshY", y);
+                config->save(file);
             } else if (action == "sprite.list") {
                 // Return all renderer-owned sprites below.
             } else if (action == "sprite.add") {
@@ -148,6 +185,33 @@ public:
                 }
                 reply->set("sprites", live);
             }
+            if (action == "ping" || action == "render.mesh") {
+                size_t x = 0, y = 0;
+                projectm_get_mesh_size(renderer, &x, &y);
+                reply->set("meshX", static_cast<int>(x));
+                reply->set("meshY", static_cast<int>(y));
+            }
+            if (action == "ping" || action == "window.displays" || action == "window.display") {
+                Poco::JSON::Array::Ptr displays = new Poco::JSON::Array;
+                auto* window = Poco::Util::Application::instance()
+                    .getSubsystem<SDLRenderingWindow>().GetRenderingWindow();
+                for (int i = 0; i < SDL_GetNumVideoDisplays(); ++i) {
+                    Poco::JSON::Object::Ptr item = new Poco::JSON::Object;
+                    const char* name = SDL_GetDisplayName(i);
+                    SDL_DisplayMode mode{};
+                    SDL_GetCurrentDisplayMode(i, &mode);
+                    item->set("index", i + 1);
+                    item->set("name", std::string(name ? name : "Display"));
+                    item->set("width", mode.w);
+                    item->set("height", mode.h);
+                    item->set("refresh", mode.refresh_rate);
+                    displays->add(item);
+                }
+                reply->set("displays", displays);
+                reply->set("display", window ? SDL_GetWindowDisplayIndex(window) + 1 : 0);
+            }
+            if (action == "ping" || action == "render.stats")
+                reply->set("fps", measuredFps);
             reply->set("ok", true);
             reply->set("activeSpriteCount", static_cast<int>(projectm_sprite_get_sprite_count(renderer)));
             reply->set("shuffle", projectm_playlist_get_shuffle(playlist));

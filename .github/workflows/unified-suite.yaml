@@ -12,6 +12,7 @@ on:
     branches:
       - master
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -418,69 +419,96 @@ jobs:
           lipo "$APP/Contents/MacOS/projectM" -verify_arch '${{ matrix.arch }}'
           lipo "$APP/Contents/MacOS/projectMSDL-offline" -verify_arch '${{ matrix.arch }}'
           test -f "$APP/Contents/PlugIns/platforms/libqcocoa.dylib"
-          # macdeployqt can leave the original LC_ID_DYLIB on copied
-          # libraries. otool -L includes that ID as its first entry; it is
-          # not a dependency. Normalize IDs and any remaining absolute loads
-          # that point to a library already present in the bundle, before signing.
+          # otool -L includes LC_ID_DYLIB (the library's own name), not just
+          # dependencies. macdeployqt can leave Homebrew install IDs behind.
+          # Inspect actual load commands, repair references only to files
+          # already in the bundle, and fail closed on missing dependencies.
           python - "$APP" '${{ matrix.arch }}' <<'PY'
-          import pathlib
+          import os
           import re
           import subprocess
           import sys
+          from pathlib import Path
 
-          app = pathlib.Path(sys.argv[1])
+          contents = Path(sys.argv[1]).resolve() / "Contents"
+          frameworks = contents / "Frameworks"
           arch = sys.argv[2]
-          frameworks = app / "Contents" / "Frameworks"
-          runner_prefixes = ("/opt/homebrew/", "/usr/local/", "/Users/runner/")
+          load_commands = {
+              "LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB",
+              "LC_LOAD_UPWARD_DYLIB", "LC_LAZY_LOAD_DYLIB",
+          }
+
           def run(*args):
-              return subprocess.check_output([str(a) for a in args], text=True)
+              return subprocess.check_output(args, text=True)
+
+          def names(binary):
+              command = None
+              for line in run("otool", "-arch", arch, "-l", str(binary)).splitlines():
+                  match = re.match(r"\s*cmd (LC_\S+)\s*$", line)
+                  if match:
+                      command = match.group(1)
+                  match = re.match(r"\s*name (.+) \(offset \d+\)\s*$", line)
+                  if match and (command == "LC_ID_DYLIB" or command in load_commands):
+                      yield command, match.group(1)
+
+          def external(name):
+              return name.startswith("/") and not name.startswith(
+                  ("/usr/lib/", "/System/Library/")
+              )
+
+          def bundled_target(name):
+              # Preserve the entire framework-relative path, not just its
+              # executable basename. For plain dylibs use the packaged name.
+              match = re.search(r"(?:^|/)([^/]+\.framework/.*)$", name)
+              relative = (name[len("@rpath/"):] if name.startswith("@rpath/")
+                          else match.group(1) if match else Path(name).name)
+              target = frameworks / relative
+              if target.is_file() and target.resolve().is_relative_to(frameworks.resolve()):
+                  return target
+              raise RuntimeError(f"No bundled library for {name}")
 
           binaries = [
-              p for p in (app / "Contents").rglob("*")
-              if p.is_file() and not p.is_symlink() and "Mach-O" in run("file", "-b", p)
+              p for p in contents.rglob("*")
+              if not p.is_symlink() and p.is_file()
+              and "Mach-O" in run("file", "-b", str(p))
           ]
-
-          def commands(binary):
-              # Inspect actual load commands, not the combined otool -L list.
-              command = None
-              for line in run("otool", "-arch", arch, "-l", binary).splitlines():
-                  line = line.strip()
-                  if line.startswith("cmd "):
-                      command = line.split()[1]
-                  elif command and (
-                      line.startswith("name ") or line.startswith("path ")
-                  ):
-                      value = re.sub(r" \(offset \d+\)$", "", line.split(" ", 1)[1])
-                      yield command, value
-                      command = None
-
-          loads = {"LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB",
-                   "LC_LOAD_UPWARD_DYLIB", "LC_LAZY_LOAD_DYLIB"}
-
           for binary in binaries:
-              subprocess.check_call(["lipo", str(binary), "-verify_arch", arch])
-              for command, value in list(commands(binary)):
-                  if command == "LC_ID_DYLIB" and value.startswith(runner_prefixes):
-                      if not binary.is_relative_to(frameworks):
-                          raise SystemExit(f"Unexpected external install ID: {binary}: {value}")
-                      new_id = "@rpath/" + binary.relative_to(frameworks).as_posix()
-                      subprocess.check_call(["install_name_tool", "-id", new_id, str(binary)])
-                  elif command in loads and value.startswith(runner_prefixes):
-                      parts = pathlib.PurePosixPath(value).parts
-                      framework = next((i for i, part in enumerate(parts)
-                                        if part.endswith(".framework")), None)
-                      rel = pathlib.Path(*parts[framework:]) if framework is not None else pathlib.Path(parts[-1])
-                      target = frameworks / rel
-                      if not target.is_file() or not target.resolve().is_relative_to(frameworks.resolve()):
-                          raise SystemExit(f"Unbundled dependency in {binary}: {value}")
-                      new_load = "@executable_path/../Frameworks/" + rel.as_posix()
-                      subprocess.check_call(["install_name_tool", "-change", value, new_load, str(binary)])
+              subprocess.run(["lipo", str(binary), "-verify_arch", arch], check=True)
+              args = []
+              for command, name in sorted(set(names(binary))):
+                  # Resolve transitive @rpath loads without relying on dyld search paths.
+                  if not external(name) and not (command in load_commands and name.startswith("@rpath/")):
+                      continue
+                  if command == "LC_ID_DYLIB":
+                      if binary.is_relative_to(frameworks):
+                          new = "@rpath/" + binary.relative_to(frameworks).as_posix()
+                      else:
+                          new = "@loader_path/" + binary.name
+                      args.extend(("-id", new))
+                  else:
+                      target = bundled_target(name)
+                      new = "@loader_path/" + os.path.relpath(target, binary.parent)
+                      args.extend(("-change", name, new))
+                  print(f"{binary.relative_to(contents)}: {command}: {name} -> {new}", flush=True)
+              if args:
+                  subprocess.run(["install_name_tool", *args, str(binary)], check=True)
 
-          # Keep the dependency gate strict; do not distribute runner-linked code.
+          # Keep the audit independent of the rewrite: inspect every actual
+          # dependency and ID again, rejecting any remaining external path.
           for binary in binaries:
-              for command, value in commands(binary):
-                  if (command in loads or command == "LC_ID_DYLIB") and value.startswith(runner_prefixes):
-                      raise SystemExit(f"External Mach-O reference in {binary}: {value}")
+              for command, name in names(binary):
+                  if external(name) or (command in load_commands and name.startswith("@rpath/")):
+                      raise RuntimeError(f"Unresolved {command} in {binary}: {name}")
+                  if command in load_commands:
+                      if name.startswith("@loader_path/"):
+                          target = binary.parent / name[len("@loader_path/"):]
+                      elif name.startswith("@executable_path/"):
+                          target = contents / "MacOS" / name[len("@executable_path/"):]
+                      else:
+                          continue
+                      if not target.is_file() or not target.resolve().is_relative_to(contents):
+                          raise RuntimeError(f"Invalid bundled load in {binary}: {name}")
+          print(f"Verified Mach-O install names and absolute loads in {len(binaries)} files")
           PY
           # Sign only after all binary changes and Info.plist are finalized.
           codesign --force --deep --sign - "$APP"

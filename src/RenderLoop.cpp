@@ -10,6 +10,11 @@
 #include <Poco/Util/Application.h>
 
 #include <SDL2/SDL.h>
+#include <array>
+#include <chrono>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 
 #include "ProjectMSDLApplication.h"
 
@@ -36,21 +41,74 @@ void RenderLoop::Run()
 
     NativeControlMailbox mailbox(ProjectMSDLApplication::instance().config().getString("native.controlDir", ""));
 
+    using Clock = std::chrono::steady_clock;
+    const bool profile = ProjectMSDLApplication::instance().config().getBool("native.profileFrames", false);
+    std::array<double, 7> timings{};
+    unsigned frames = 0;
+    auto reportStart = Clock::now();
+    auto phaseStart = reportStart;
+    auto fpsSampleStart = Clock::now();
+    unsigned fpsSampleFrames = 0;
+    double measuredFps = 0.0;
+    auto mark = [&](std::size_t phase) {
+        if (!profile) return;
+        const auto now = Clock::now();
+        timings[phase] += std::chrono::duration<double, std::milli>(now - phaseStart).count();
+        phaseStart = now;
+    };
     while (!_wantsToQuit)
     {
         limiter.TargetFPS(_projectMWrapper.TargetFPS());
         limiter.StartFrame();
 
+        if (profile) phaseStart = Clock::now();
         PollEvents();
-        mailbox.poll(_projectMHandle, _playlistHandle, _projectMGui.ManagedSprites());
         CheckViewportSize();
+        mark(0);
+        mailbox.poll(_projectMHandle, _playlistHandle, _projectMGui.ManagedSprites(), measuredFps);
+        mark(1);
         _audioCapture.FillBuffer();
+        mark(2);
         _projectMWrapper.RenderFrame();
+        mark(3);
         _projectMGui.Draw();
+        mark(4);
 
         _sdlRenderingWindow.Swap();
+        mark(5);
 
         limiter.EndFrame();
+        mark(6);
+        if (profile && ++frames && Clock::now() - reportStart >= std::chrono::seconds(2))
+        {
+            const char* labels[] = {"events/viewport", "mailbox", "audio", "render", "GUI", "swap", "limiter"};
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(2) << "Frame profile (mean ms, " << frames << " frames):";
+            double total = 0.0;
+            for (std::size_t i = 0; i < timings.size(); ++i)
+            {
+                line << " " << labels[i] << "=" << timings[i] / frames;
+                total += timings[i] / frames;
+            }
+            line << " total=" << total << " FPS=" << limiter.FPS();
+            std::cerr << line.str() << std::endl;
+            timings.fill(0.0);
+            frames = 0;
+            reportStart = Clock::now();
+        }
+
+        // Count completed frames using a high-resolution half-second sample.
+        // Avoid filesystem or logging work on every frame for the status bar.
+        if (mailbox.enabled()) {
+            ++fpsSampleFrames;
+            const auto now = Clock::now();
+            const auto elapsed = std::chrono::duration<double>(now - fpsSampleStart).count();
+            if (elapsed >= 0.5) {
+                measuredFps = fpsSampleFrames / elapsed;
+                fpsSampleFrames = 0;
+                fpsSampleStart = now;
+            }
+        }
 
         // Pass projectM the actual FPS value of the last frame.
         _projectMWrapper.UpdateRealFPS(limiter.FPS());
