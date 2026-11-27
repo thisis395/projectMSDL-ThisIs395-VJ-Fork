@@ -518,6 +518,21 @@ jobs:
           "$APP/Contents/MacOS/projectM" --vj-renderer-probe --controlDir "$probe_dir"
           (cd "$GITHUB_WORKSPACE/ThisIs395-VJ-suite" && tar -czf "$GITHUB_WORKSPACE/ThisIs395-VJ-suite-macos-${{ matrix.artifact }}.tar.gz" projectM.app)
 
+          # Test the exact distributable after extraction at a different path,
+          # with no inherited DYLD_* or Homebrew search environment.
+          relocated="$(mktemp -d "$RUNNER_TEMP/vj-relocation.XXXXXX")"
+          trap 'rm -rf "$relocated"' EXIT
+          mkdir -p "$relocated/Install With Spaces" "$relocated/probe" "$relocated/home"
+          tar -xzf "$GITHUB_WORKSPACE/ThisIs395-VJ-suite-macos-${{ matrix.artifact }}.tar.gz" -C "$relocated/Install With Spaces"
+          relocated_app="$relocated/Install With Spaces/projectM.app"
+          codesign --verify --deep --strict --verbose=2 "$relocated_app"
+          (
+            cd "$relocated"
+            env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$relocated/home" TMPDIR="$relocated" \
+              "$relocated_app/Contents/MacOS/projectM" --vj-renderer-probe --controlDir "$relocated/probe"
+          )
+          echo "Relocated distributable passed its renderer launch probe."
+
       - name: Upload unified macOS suite
         uses: actions/upload-artifact@v6
         with:

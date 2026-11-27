@@ -54,7 +54,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT ENABLE_FLAT_PACKAGE)
 
     set(PROJECTMSDL_PROPERTIES_FILENAME "projectM.properties")
 
-    set(CMAKE_INSTALL_RPATH "@loader_path/../PlugIns")
+    # macdeployqt installs shared libraries and Qt frameworks in Frameworks,
+    # while the legacy projectMSDL dependency installer may use PlugIns.
+    # Keep both locations, with the standard app bundle location first.
+    set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks;@loader_path/../PlugIns")
+    # Leave space for install_name_tool when fixing relocatable load commands.
+    add_link_options("-Wl,-headerpad_max_install_names")
 else()
     set(DEFAULT_PACKAGING_CONFIG "packaging-windows.cmake")
 
